@@ -1,0 +1,71 @@
+---
+title: "Explore and Summarize Data (Prosper Loan Data)"
+author: "Ekaterina Kravtchenko"
+date: "5/20/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Exploration
+
+```{r data, message=FALSE}
+library(tidyverse)
+library(magrittr)
+data <- read.csv("prosperLoanData.csv", stringsAsFactors = TRUE, na.strings = "")
+data <- as.tibble(data)
+```
+
+a. Headings and text should organize your thoughts and reflect your analysis as you explored the data.
+b. Plots in this analysis do not need to be polished with labels, units, and titles; these plots are exploratory (quick and dirty). They should, however, be of the appropriate type and effectively convey the information you glean from them.
+c. You can iterate on a plot in the same R chunk, but you don’t need to show every plot iteration in your analysis.
+
+### Data Cleaning
+
+Above, I by default imported the character columns as factors, as (....).  The first thing I will do now is take a closer look at the data, and see if other columns are formatted appropriately:
+
+```{r cars, cache=TRUE}
+data
+str(data)
+```
+
+The first thing I notice is that there are several date columns which should be formatted as such, and several boolean (True/False) columns.  I also want to order the levels in some of the factor columns, as they are inherently ordered (`CreditGrade`, `ProsperRating..Alpha.`, `IncomeRange`, `LoanOriginationQuarter`).
+
+```{r, cache=TRUE}
+data %<>% 
+  mutate_at(c("ListingCreationDate","ClosedDate","DateCreditPulled","FirstRecordedCreditLine","LoanOriginationDate"), as.Date) %>%
+  mutate_at(c("IsBorrowerHomeowner","CurrentlyInGroup","IncomeVerifiable"), as.logical)
+
+data$CreditGrade <- ordered(data$CreditGrade, c("NC","HR","E","D","C","B","A","AA"))
+data$ProsperRating..Alpha. <- ordered(data$ProsperRating..Alpha., c("NC","HR","E","D","C","B","A","AA"))
+data$IncomeRange <- ordered(data$IncomeRange, c("Not displayed","Not employed","$0","$1-24,999","$25,000-49,999","$50,000-74,999","$75,000-99,999","$100,000+"))
+data$LoanOriginationQuarter <- ordered(data$LoanOriginationQuarter, c("Q1 2006", "Q2 2006", "Q3 2006", "Q4 2006", "Q1 2007", "Q2 2007", "Q3 2007", "Q4 2007", "Q1 2008", "Q2 2008", "Q3 2008", "Q4 2008", "Q1 2009", "Q2 2009", "Q3 2009", "Q4 2009", "Q1 2010", "Q2 2010", "Q3 2010", "Q4 2010", "Q1 2011", "Q2 2011", "Q3 2011", "Q4 2011", "Q1 2012", "Q2 2012", "Q3 2012", "Q4 2012", "Q1 2013", "Q2 2013", "Q3 2013", "Q4 2013", "Q1 2014", "Q2 2014", "Q3 2014", "Q4 2014"))
+
+str(data)
+```
+
+Now I want to take a look at a summary data, to try to figure out what might be going on:
+
+```{r, cache=TRUE}
+summary(data)
+```
+
+I first see that there's a lot of missing data in many of the columns - it's not clear to me immediately whether this indicates that the data for those rows is truly missing (but theoretically could have been gathered), or if the information in those columns was simply not applicable to those rows.  I will sort this out as I move through the data.
+
+The factors of most interest to a bank, I assume, might be (for example) `LoanStatus`, `LenderYield`, `EstimatedEffectiveYield`, `EstimatedLoss`, `EstimatedReturn`, `CurrentDelinquencies`, `AmountDelinquent`, `OnTimeProsperPayments`, `LoanCurrentDaysDelinquent`, `LP_GrossPrincipalLoss`, and `LP_NetPrincipalLoss`.  Since the primary concern of a business is profit, these seem most indicative of how much the bank might profit from any particular customer.  What the bank should care about, overall, is the ability to predict whether (or to what degree) a given (current or future) customer will be profitable.
+
+On the other hand, the factors I intuitively expect might be predictive are the following (for example): `CreditGrade`, `Occupation`, `EmploymentStatus`, `EmploymentStatusDuration`, `IsBorrowerHomeowner`, `FirstRecordedCreditLine`, `OpenRevolvingAccounts`, `InquiriesLast6Months`, `RevolvingCreditBalance`, `BankcardUtilization`, `TotalTrades`, `DebtToIncomeRatio`, `IncomeRange`, `IncomeVerifiable`, `TotalProsperLoans`,  and `LoanOriginationQuarter`.
+
+## Final Plots and Summary
+
+You will select three plots from your analysis to polish and share in this section. The three plots should show different trends and should be polished with appropriate labels, units, and titles (see the Project Rubric for more information).
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+## Reflection
+
+This should contain a few sentences about your struggles, successes, and ideas for future exploration on the data set (see the Project Rubric for more information).
