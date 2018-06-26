@@ -5,18 +5,17 @@ date: "5/20/2018"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## Data Exploration
 
-```{r data, message=FALSE}
+```{r data import, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(magrittr)
 library(scales)
-data <- read.csv("prosperLoanData.csv", stringsAsFactors = TRUE, na.strings = "")
-data <- as.tibble(data)
+data <- read_csv("prosperLoanData.csv") %>% mutate_if(is.character, as.factor)
 ```
 
 a. Headings and text should organize your thoughts and reflect your analysis as you explored the data.
@@ -27,20 +26,23 @@ c. You can iterate on a plot in the same R chunk, but you don’t need to show e
 
 Above, I by default imported the character columns as factors, as (....).  The first thing I will do now is take a closer look at the data, and see if other columns are formatted appropriately:
 
-```{r cars, cache=TRUE}
+```{r data glimpse, cache=TRUE}
 data
 str(data)
 ```
 
-The first thing I notice is that there are several date columns which should be formatted as such, and several boolean (True/False) columns.  I also want to order the levels in some of the factor columns, as they are inherently ordered (`CreditGrade`, `ProsperRating..Alpha.`, `IncomeRange`, `LoanOriginationQuarter`).
+The first thing I notice is that there are several date columns which should be formatted as such, and several boolean (True/False) columns.  I also want to order the levels in some of the factor columns, as they are inherently ordered (`CreditGrade`, `ProsperRating.alpha`, `IncomeRange`, `LoanOriginationQuarter`).
 
-```{r, cache=TRUE}
+```{r basic data cleaning, cache=TRUE}
 data %<>% 
   mutate_at(c("ListingCreationDate","ClosedDate","DateCreditPulled","FirstRecordedCreditLine","LoanOriginationDate"), as.Date) %>%
-  mutate_at(c("IsBorrowerHomeowner","CurrentlyInGroup","IncomeVerifiable"), as.logical)
+  mutate_at(c("IsBorrowerHomeowner","CurrentlyInGroup","IncomeVerifiable"), as.logical) %>%
+  rename_all(~sub(" (numeric)", ".num", ., fixed=TRUE)) %>%
+  rename_all(~sub(" (Alpha)", ".alpha", ., fixed=TRUE)) %>%
+  rename_all(~sub(" (percentage)", ".per", ., fixed=TRUE))
 
 data$CreditGrade <- ordered(data$CreditGrade, c("NC","HR","E","D","C","B","A","AA"))
-data$ProsperRating..Alpha. <- ordered(data$ProsperRating..Alpha., c("NC","HR","E","D","C","B","A","AA"))
+data$ProsperRating.alpha <- ordered(data$ProsperRating.alpha, c("NC","HR","E","D","C","B","A","AA"))
 data$IncomeRange <- ordered(data$IncomeRange, c("Not displayed","Not employed","$0","$1-24,999","$25,000-49,999","$50,000-74,999","$75,000-99,999","$100,000+"))
 data$LoanOriginationQuarter <- ordered(data$LoanOriginationQuarter, c("Q1 2006", "Q2 2006", "Q3 2006", "Q4 2006", "Q1 2007", "Q2 2007", "Q3 2007", "Q4 2007", "Q1 2008", "Q2 2008", "Q3 2008", "Q4 2008", "Q1 2009", "Q2 2009", "Q3 2009", "Q4 2009", "Q1 2010", "Q2 2010", "Q3 2010", "Q4 2010", "Q1 2011", "Q2 2011", "Q3 2011", "Q4 2011", "Q1 2012", "Q2 2012", "Q3 2012", "Q4 2012", "Q1 2013", "Q2 2013", "Q3 2013", "Q4 2013", "Q1 2014", "Q2 2014", "Q3 2014", "Q4 2014"))
 
@@ -51,7 +53,7 @@ str(data)
 
 Now I want to take a look at a summary of the data, to try to figure out what might be going on:
 
-```{r, cache=TRUE}
+```{r second data glimpse, cache=TRUE}
 summary(data)
 glimpse(data)
 ```
@@ -94,7 +96,7 @@ What I see here is that the higher the credit score, in general, the greater the
 
 At this point, I want to take a closer look at the `NA` catetory.
 
-```{r}
+```{r NA credit grades}
 data %>%
   group_by(CreditGrade) %>%
   summarize_if(is.numeric, mean, na.rm=TRUE)
@@ -102,7 +104,7 @@ data %>%
 
 It is not immediately clear what distinguishes these lenders, and why they have no recorded credit rating.  The `NA`s have much higher `ListingNumber`s, a slightly higher `Term`, they actually have the following: `EstimatedEffectiveYield`, `EstimatedLoss`, `EstimatedReturn`, `ProsperRating`, `ProsperScore`.  They have a higher `ListingCategory`, a much higher average `EmploymentStatusDuration`, but don't differ too obviously along other measures.  They have lower average `PublicRecordsLast12Months`, significantly more `TotalProsperPaymentsBilled` and `OnTimeProsperPayments`, and a much lower average `LoanCurrentDaysDelinquent`.  They have a lower `LoanMonthsSinceOrigination` and a higher `LoanNumber`.  They are the only ones less than fully funded (`PercentFunded`).  They have relatively little investment from friends (`InvestmentFromFriendsAmount`).  
 
-```{r}
+```{r credit grade by account date}
 library(lubridate)
 
 data %>%
@@ -127,8 +129,8 @@ This may be more useeful - NAs had listing created and closed later, although th
 
 Here, I quickly want to look at how well-correlated the numerical factors associated with profit are, to see if I need to look at all of them when seeing how predictive demographic factors are of profit.
 
-```{r}
-profit <- c("LenderYield", "EstimatedEffectiveYield", "EstimatedLoss", "EstimatedReturn", "CurrentDelinquencies", "AmountDelinquent", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent", "LP_GrossPrincipalLoss", "LP_NetPrincipalLoss","ProsperRating..numeric.")
+```{r profit correlation plot}
+profit <- c("LenderYield", "EstimatedEffectiveYield", "EstimatedLoss", "EstimatedReturn", "CurrentDelinquencies", "AmountDelinquent", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent", "LP_GrossPrincipalLoss", "LP_NetPrincipalLoss","ProsperRating.num")
 
 library(ggcorrplot)
 
@@ -147,13 +149,13 @@ The profit measures showing the highest correlations with other measures are the
 
 If credit grades are only assigned once the fate of the loan is known, it may be more useful to look at how predictive pre-existing factors such as `Occupation` are of profit measures.
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","Occupation")
+```{r profit by occupation}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","Occupation")
 
 plot_data <- data[subset] %>% 
   group_by(Occupation) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  mutate(Occupation = reorder(Occupation, ProsperRating..numeric., mean)) %>%
+  mutate(Occupation = reorder(Occupation, ProsperRating.num, mean)) %>%
   gather(Measure, Value, -Occupation)
 
 ggplot(plot_data, aes(x = Occupation, y=Value)) +
@@ -168,8 +170,8 @@ There are too many occupations to make easy generalizations.  Occupations would 
 
 ### Income Range vs. Profit
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by income range}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","IncomeRange")
 
 plot_data <- data[subset] %>% 
   group_by(IncomeRange) %>% 
@@ -192,17 +194,17 @@ Here, I will look at the relationship between other predictors and profit measur
 
 `EmploymentStatus`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by employment status}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","EmploymentStatus")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(EmploymentStatus) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -EmploymentStatus)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = EmploymentStatus, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by EmploymentStatus") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -210,17 +212,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `EmploymentStatusDuration`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by employment status duration}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","EmploymentStatusDuration")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(EmploymentStatusDuration) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -EmploymentStatusDuration)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = EmploymentStatusDuration, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by EmploymentStatusDuration") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -228,17 +230,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `IsBorrowerHomeowner`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by homeowner}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","IsBorrowerHomeowner")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(IsBorrowerHomeowner) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -IsBorrowerHomeowner)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = IsBorrowerHomeowner, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by IsBorrowerHomeowner") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -246,17 +248,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `FirstRecordedCreditLine`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by first credit line}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","FirstRecordedCreditLine")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(FirstRecordedCreditLine) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -FirstRecordedCreditLine)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = FirstRecordedCreditLine, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by FirstRecordedCreditLine") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -264,17 +266,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `OpenRevolvingAccounts`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by open revolving accounts}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","OpenRevolvingAccounts")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(OpenRevolvingAccounts) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -OpenRevolvingAccounts)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = OpenRevolvingAccounts, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by OpenRevolvingAccounts") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -282,17 +284,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `InquiriesLast6Months`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by credit inquiries}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","InquiriesLast6Months")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(InquiriesLast6Months) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -InquiriesLast6Months)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = InquiriesLast6Months, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by InquiriesLast6Months") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -300,17 +302,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `RevolvingCreditBalance`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by revolving credit balance}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","RevolvingCreditBalance")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(RevolvingCreditBalance) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -RevolvingCreditBalance)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = RevolvingCreditBalance, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by RevolvingCreditBalance") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -318,17 +320,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `BankcardUtilization`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by bank card use}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","BankcardUtilization")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(BankcardUtilization) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -BankcardUtilization)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = BankcardUtilization, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by BankcardUtilization") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -336,17 +338,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `TotalTrades`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by total trades}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","TotalTrades")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(TotalTrades) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -TotalTrades)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = TotalTrades, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by TotalTrades") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -354,17 +356,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `DebtToIncomeRatio`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by debt to income ratio}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","DebtToIncomeRatio")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(DebtToIncomeRatio) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -DebtToIncomeRatio)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = DebtToIncomeRatio, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by DebtToIncomeRatio") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -372,17 +374,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `IncomeVerifiable`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by whether income verifiable}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","IncomeVerifiable")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(IncomeVerifiable) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -IncomeVerifiable)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = IncomeVerifiable, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by IncomeVerifiable") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -390,17 +392,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `TotalProsperLoans`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by total prosper loans}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","TotalProsperLoans")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(TotalProsperLoans) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -TotalProsperLoans)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = TotalProsperLoans, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by TotalProsperLoans") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -408,17 +410,17 @@ ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
 
 `LoanOriginationQuarter`
 
-```{r}
-subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating..numeric.","IncomeRange")
+```{r profit by loan orig. quarter}
+subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","LoanOriginationQuarter")
 
 plot_data <- data[subset] %>% 
-  group_by(IncomeRange) %>% 
+  group_by(LoanOriginationQuarter) %>% 
   summarize_all(funs(mean(., na.rm = TRUE))) %>%
-  gather(Measure, Value, -IncomeRange)
+  gather(Measure, Value, -LoanOriginationQuarter)
 
-ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+ggplot(plot_data, aes(x = LoanOriginationQuarter, y=Value)) +
   geom_bar(stat = "identity") +
-  labs(title = "Profit by IncomeRange") +
+  labs(title = "Profit by LoanOriginationQuarter") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -430,8 +432,16 @@ Ultimately, without knowing how the loans ultimately panned out, it is a bit dif
 
 You will select three plots from your analysis to polish and share in this section. The three plots should show different trends and should be polished with appropriate labels, units, and titles (see the Project Rubric for more information).
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r final plot 1, echo=FALSE}
+
+```
+
+```{r final plot 2, echo=FALSE}
+
+```
+
+```{r final plot 3, echo=FALSE}
+
 ```
 
 ## Reflection
