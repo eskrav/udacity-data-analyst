@@ -11,3 +11,7 @@ forcats
 magrittr
 bindrcpp
 scales
+lubridate
+skimr
+ggcorrplot
+hexbin

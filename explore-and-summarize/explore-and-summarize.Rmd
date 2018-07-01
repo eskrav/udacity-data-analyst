@@ -1,37 +1,39 @@
 ---
 title: "Explore and Summarize Data (Prosper Loan Data)"
 author: "Ekaterina Kravtchenko"
-date: "5/20/2018"
+date: "7/1/2018"
 output: html_document
 ---
 
 ```{r setup, include=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+Sys.setenv(TZ="zone/tz/2018c.1.0/zoneinfo/Europe/Berlin")
 ```
 
 ## Data Exploration
 
-```{r data import, message=FALSE, warning=FALSE}
+```{r data import, message=FALSE, warning=FALSE, cache=TRUE}
 library(tidyverse)
 library(magrittr)
 library(scales)
+library(hexbin)
 data <- read_csv("prosperLoanData.csv") %>% mutate_if(is.character, as.factor)
 ```
 
-a. Headings and text should organize your thoughts and reflect your analysis as you explored the data.
-b. Plots in this analysis do not need to be polished with labels, units, and titles; these plots are exploratory (quick and dirty). They should, however, be of the appropriate type and effectively convey the information you glean from them.
-c. You can iterate on a plot in the same R chunk, but you don’t need to show every plot iteration in your analysis.
+<!-- a. Headings and text should organize your thoughts and reflect your analysis as you explored the data. -->
+<!-- b. Plots in this analysis do not need to be polished with labels, units, and titles; these plots are exploratory (quick and dirty). They should, however, be of the appropriate type and effectively convey the information you glean from them. -->
+<!-- c. You can iterate on a plot in the same R chunk, but you don’t need to show every plot iteration in your analysis. -->
 
 ### Data Cleaning
 
-Above, I by default imported the character columns as factors, as (....).  The first thing I will do now is take a closer look at the data, and see if other columns are formatted appropriately:
+Above, I imported the character columns as factors, as having taken a closer look at the data, they are labels for categories, rather than strings (in the following analysis, I don't find any disconfirmation of this).  The first thing I will do now is take a closer look at the data, and see if other columns are formatted appropriately:
 
-```{r data glimpse, cache=TRUE}
-data
+```{r data glimpse, cache=TRUE, warning=FALSE, message=FALSE}
+data[,1:7]
 str(data)
 ```
 
-The first thing I notice is that there are several date columns which should be formatted as such, and several boolean (True/False) columns.  I also want to order the levels in some of the factor columns, as they are inherently ordered (`CreditGrade`, `ProsperRating.alpha`, `IncomeRange`, `LoanOriginationQuarter`).
+The first thing I notice is that there are several date columns which should be formatted as such, and several boolean (True/False) type columns.  I also want to order the levels in some of the factor columns, as they are inherently ordered (`CreditGrade`, `ProsperRating.alpha`, `IncomeRange`, `LoanOriginationQuarter`).  Several of the columns have spaces or special characters in the column names, which makes it difficult to refer to these columns - I will rename these.
 
 ```{r basic data cleaning, cache=TRUE}
 data %<>% 
@@ -45,7 +47,9 @@ data$CreditGrade <- ordered(data$CreditGrade, c("NC","HR","E","D","C","B","A","A
 data$ProsperRating.alpha <- ordered(data$ProsperRating.alpha, c("NC","HR","E","D","C","B","A","AA"))
 data$IncomeRange <- ordered(data$IncomeRange, c("Not displayed","Not employed","$0","$1-24,999","$25,000-49,999","$50,000-74,999","$75,000-99,999","$100,000+"))
 data$LoanOriginationQuarter <- ordered(data$LoanOriginationQuarter, c("Q1 2006", "Q2 2006", "Q3 2006", "Q4 2006", "Q1 2007", "Q2 2007", "Q3 2007", "Q4 2007", "Q1 2008", "Q2 2008", "Q3 2008", "Q4 2008", "Q1 2009", "Q2 2009", "Q3 2009", "Q4 2009", "Q1 2010", "Q2 2010", "Q3 2010", "Q4 2010", "Q1 2011", "Q2 2011", "Q3 2011", "Q4 2011", "Q1 2012", "Q2 2012", "Q3 2012", "Q4 2012", "Q1 2013", "Q2 2013", "Q3 2013", "Q4 2013", "Q1 2014", "Q2 2014", "Q3 2014", "Q4 2014"))
+```
 
+```{r basic glimpse, cache=TRUE, message=FALSE, warning=FALSE}
 str(data)
 ```
 
@@ -53,84 +57,113 @@ str(data)
 
 Now I want to take a look at a summary of the data, to try to figure out what might be going on:
 
-```{r second data glimpse, cache=TRUE}
+```{r second data glimpse, cache=TRUE, message=FALSE, warning=FALSE}
 summary(data)
-glimpse(data)
 ```
 
-I first see that there's a lot of missing data in many of the columns - it's not clear to me immediately whether this indicates that the data for those rows is truly missing (but theoretically could have been gathered), or if the information in those columns was simply not applicable to those rows.  I will sort this out as I move through the data.
+I first see that there's a lot of missing data in many of the columns - it's not clear to me immediately whether this indicates that the data for those rows is truly missing (but theoretically could have been gathered), or if the information in those columns was simply not applicable to those rows.  I will sort this out as I move through the data, but I want to see if some information is, for example, only entered once the loan has been closed or completed.  First, though, I will identify the factors of interest.
 
-The factors of most interest to a bank, I assume, might be (for example) `LoanStatus`, `LenderYield`, `EstimatedEffectiveYield`, `EstimatedLoss`, `EstimatedReturn`, `CurrentDelinquencies`, `AmountDelinquent`, `OnTimeProsperPayments`, `LoanCurrentDaysDelinquent`, `LP_GrossPrincipalLoss`, and `LP_NetPrincipalLoss`.  Since the primary concern of a business is profit, these seem most indicative of how much the bank might profit from any particular customer.  What the bank should care about, overall, is the ability to predict whether (or to what degree) a given (current or future) customer will be profitable.
+#### Factors of Interest
 
-On the other hand, the factors I intuitively expect might be predictive of profit are the following (for example): `CreditGrade`, `Occupation`, `EmploymentStatus`, `EmploymentStatusDuration`, `IsBorrowerHomeowner`, `FirstRecordedCreditLine`, `OpenRevolvingAccounts`, `InquiriesLast6Months`, `RevolvingCreditBalance`, `BankcardUtilization`, `TotalTrades`, `DebtToIncomeRatio`, `IncomeRange`, `IncomeVerifiable`, `TotalProsperLoans`,  and `LoanOriginationQuarter`.
+Prosper Loans, through cursory research (https://en.wikipedia.org/wiki/Prosper_Marketplace), appears to be a peer-to-peer lending company.  The primary concern of companies is profit, and in this case, as I see no obvious measure of profit to the company itself, I will focus on profit to the lender (the lenders, presumably, keep the company in business).  Of course, borrowers likewise keep the company in business, and given the measures collected, it's possible to at least take a look at how borrower demographics influence loan funding.  Variable names are cross-referenced with a document linked from the Kaggle site: https://docs.google.com/spreadsheets/d/1gDyi_L4UvIrLTEC6Wri5nbaMmkGmLQBk-Yx3z0XDEtI/edit#gid=0.
 
-## Predictive Value
+The factors of most interest to lenders, I assume, might be (for example) `LoanStatus` (whether a loan is in good standing, repaid, or written off, etc.), `LenderYield` (yield minus servicing fee), `EstimatedEffectiveYield` (yield minus servicing fee and uncollected interest, and plus late fees) - likely more informative than the preceding, `EstimatedReturn` (), `EstimatedLoss` (loss on charge-offs), `LoanCurrentDaysDelinquent`, `LP_GrossPrincipalLoss`, and `LP_NetPrincipalLoss`.  These seem most indicative of how much lenders might profit, or lose, from any particular borrower.  What the lender should care most about, overall, is the ability to predict whether (or to what degree) a given (current or future) loan will pay off.  In some cases, it is unclear from the documentation whether these are predictions assigned by Prosper at the outset, or descriptions of what actually happened during the course of loans.  Exploring the data might shed some light on this.
 
-At this point, I want to take a look at how predictive the above background or demographic factors are of factors most closely related to profit.  First, I will plot this.
+On the other hand, the factors I intuitively expect might be predictive of profit are the following (for example): `CreditGrade` (credit assigned when the listing went live), `ProsperRating` (rating assigned when the loan went live), `ProsperScore` (risk score), `EstimatedReturn` (predicted difference between estimated effective yield and estimated loss), `ListingCategory` (what the loan is for), `Occupation`, `EmploymentStatus`, `EmploymentStatusDuration`, `IsBorrowerHomeowner`, `CreditScoreRangeLower`/`CreditScoreRangeUpper`, `FirstRecordedCreditLine`, `CurrentCreditLines`, `OpenCreditLines`, `TotalCreditLinespast7years`, `OpenRevolvingAccounts`, `OpenRevolvingMonthlyPayment`, `InquiriesLast6Months`, `TotalInquiries`, `CurrentDelinquencies`, `AmountDelinquent`, `DelinquenciesLast7Years`, `PublicRecordsLast10Years`, `PublicRecordsLast12Months`, `RevolvingCreditBalance`, `BankcardUtilization`, `AvailableBankcardCredit`, `TotalTrades` (number of trade lines ever opened), `TradesNeverDelinquent`, `TradesOpenedLast6Months`, `DebtToIncomeRatio`, `IncomeRange`, `IncomeVerifiable`, `StatedMonthlyIncome`, `TotalProsperLoans` (prior Prosper loans), `TotalProsperPaymentsBilled` (presumably, number of payments billed at time of listing), `OnTimeProsperPayments` (number of on-time payments at time of listing), `ProsperPaymentsLessThanOneMonthLate`, `ProsperPaymentsOneMonthPlusLate`, `ProsperPrincipalBorrowed` (amount borrowed at time of listing), `ProsperPrincipalOutstanding` (amount outstanding at time of listing), `Recommendations` (number of recommendations at time of listing), `InvestmentFromFriendsCount` (number of friends investing), and`InvestmentFromFriendsAmount` (amount invested by friends), and `Investors` (total number of investors).  There are too many of these categories, and I expect to narrow the list I will look at down to a few, particularly when multiple measures reflect more-or-less the same thing, or don't show any distinct patterns of correlating with other variables.
 
-### Loan Status vs. Credit Grade
+With respect to loan funding, some of the same predictors likely also influence loan amounts and borrower funding, as most likely reflected by `BorrowerAPR`, `BorrowerRate`, `LoanOriginalAmount`, `MonthlyLoanPayment`, `Term` (the length of the loan), and `PercentFunded` (although this is likely to not be informative for recently created loans).
 
-For `LoanStatus`, as this is not a quantitative or clearly ordered factor, it may make sense to group some of the levels.  I therefore group all `Past Due` levels together, and order the levels loosely in terms of 'goodness' - assuming that being on time, or having paid off the loan, is 'good,' and that having defaulted, or having the loan charged off, is 'bad.'  I then plot `LoanStatus` by `CreditGrade`, to see if there are any obvious patterns on how likely one is to have a particular loan status, given a particular credit grade.
+The borrowers and loans are primary indexed through the variables `MemberKey` and `LoanNumber`.  Additional variables for keeping track of loans include `LoanOriginationDate` and `LoanOriginationQuarter`.  `ClosedDate` is useful for quickly indexing loans which have been closed, and for which firm conclusions can be drawn as to how much lenders profited.
 
-```{r first impressions, echo=FALSE}
+#### NA Values
+
+Here I want to double-check why information might be missing (e.g., whether some variables are assigned only once a loan has been closed).
+
+```{r loan completion, cache=TRUE}
+closed <- round(colMeans(is.na(filter(data, !is.na(ClosedDate))))*100,2)
+not_closed <- round(colMeans(is.na(filter(data, is.na(ClosedDate))))*100,2)
+data.frame(closed, not_closed)
+```
+
+The first thing I notice is that whether a loan is closed, or not, is quite, but in most cases not entirely, predictive of whether missing values are present, or not.
+
+None of the open loans have a credit grade, while about half of the closed loans do.  I assume that those which do are post-July 2009 loans, which were never assigned a credit grade.
+
+```{r closed credit grade, cache=TRUE, message=FALSE, warning=FALSE}
+summary(filter(data, !is.na(ClosedDate) & is.na(CreditGrade)))
+```
+
+Here, I see that at least one loan prior to 2009 has no credit grade.
+
+```{r closed credit grade old, cache=TRUE, message=FALSE, warning=FALSE}
+summary(filter(data, !is.na(ClosedDate) & is.na(CreditGrade) & ListingCreationDate < "2009-07-01"))
+```
+
+I see that 130 loans are missing a credit grade for no apparent reason.  I don't see any pattern here, and assume that it is impossible right now for me to tell why this data is missing.  However, this is a relatively small amount of data.
+
+I am otherwise assuming that `CreditGrade` was effectively replaced by `ProsperScore` in 2009, and that these can be used more-or-less interchangeably, particularly given that their labels correspond.
+
+Next, I notice that only about half of the closed loans have estimated effective lender yields or several other estimates of yield/loss, although they are not closed.  I assume these are pre-July 2009 listings, but I want to take a closer look at them.
+
+```{r lender yield NA, cache=TRUE, message=FALSE, warning=FALSE}
+summary(filter(data, !is.na(ClosedDate) & is.na(EstimatedEffectiveYield)))
+```
+
+That is indeed the case, and as the same percentage of the other similar measures is missing, I will assume this is also the case for those measures.
+
+I see that some borrower demographic, employment, and previous credit information is missing, but I assume that this is simply missing data, with no larger story behind it, particularly as this is a relatively small percentage of loans.  I also see that more of this information is missing for loans that have been closed, which suggests to me that this data was either lost, or not gathered as thoroughly in the past.
+
+The majority of the borrowers in both categories have no prior Prosper history, and it would be interesting to see if, for example, not having any Prosper history leads to more delinquencies than having positive Prosper history.
+
+Most loans were not charged off, but about 30% of closed loans at least at some point became delinquent (`LoanFirstDefaultedCycleNumber`).  A very small number of open loans are delinquent.
+
+## Lender Profit
+
+At this point, I want to take a look, through plotting correlations, at how predictive the above background, financial, or demographic measures are of measures most closely related to lender profit.
+
+### `LoanStatus` vs. `CreditGrade`/`ProsperRating`
+
+In the case of `LoanStatus`, as this is not a quantitative or clearly ordered factor, it may make sense to at least visually organize some of the levels.  I therefore 'group' all `Past Due` levels together, and order the levels loosely in terms of 'goodness' - assuming that being on time, or having paid off the loan, is 'good,' and that having defaulted, or having the loan charged off, is 'bad.'  I group `CreditGrade` and `ProsperRating` into one measure, and then plot `LoanStatus` by this new rating, to see if there are any obvious patterns on how likely one is to have a particular loan status, given a particular starting rating.
+
+```{r first impressions, echo=FALSE, cache=TRUE}
 pastDue <- levels(data$LoanStatus)[7:12]
 
 plot_data <- data %>% 
   mutate(LoanStatus = fct_recode(LoanStatus, "PastDue" = pastDue[1], "PastDue" = pastDue[2], "PastDue" = pastDue[3], "PastDue" = pastDue[4], "PastDue" = pastDue[5], "PastDue" = pastDue[6])) %>%
+  mutate(Rating = coalesce(CreditGrade, ProsperRating.alpha)) %>%
   mutate(LoanStatus = ordered(LoanStatus, c("Defaulted","Chargedoff","PastDue","Cancelled","Current","FinalPaymentInProgress","Completed"))) %>%
-  group_by(CreditGrade, LoanStatus) %>% 
+  group_by(Rating, LoanStatus) %>% 
   tally %>% 
   mutate(percent = n/sum(n))
 
 ggplot(plot_data, aes(x = LoanStatus, y = percent)) +
   geom_bar(stat = "identity") +
   geom_text(aes(label = percent(percent)), hjust = -0.25) +
-  labs(title = "Loan Status by Credit Grade", y = "Percent", x = "Loan Status") +
+  labs(title = "Loan Status by Rating", y = "Percent", x = "Loan Status") +
   scale_y_continuous(labels = percent, limits = c(0,1)) +
   scale_x_discrete(labels = function(x) str_wrap(x, 10)) +
-  facet_wrap(~CreditGrade) +
+  facet_wrap(~Rating) +
   coord_flip()
 ```
 
-What I see here is that the higher the credit score, in general, the greater the likelihood that the loan has been paid off, and the lower the likelihood that it has been charged off or defaulted.  Things get a bit more complicated with the `NA` category - these customers are all over the place, and while most are current, and a sizeable number have paid off their loans, there are also a number of customers who are past due, have defaulted, or have had their loan charged off.  This overall picture suggests to me that the bank assigns credit grades only after a loan has been paid off, or otherwise 'ended.' There is no way to predict based on credit grades, for existing customers in this database, whether a particular loan will be paid off (or otherwise), but it is likely that a customer with a higher credit grade will be more likely to pay off a loan in the future.
+What I see here is that the higher the rating, the greater the likelihood that the loan is either completed or current, and the less the likelihood that it is past due, charged off, or defaulted.  Overall, it seems that a customer with a higher rating at the time the loan is posted will indeed be more likely to pay off a loan in the future.
 
-At this point, I want to take a closer look at the `NA` catetory.
+### Exploring Profit Measures
 
-```{r NA credit grades}
-data %>%
-  group_by(CreditGrade) %>%
-  summarize_if(is.numeric, mean, na.rm=TRUE)
+First, I want to get a sense of when these measures might be getting assigned, in cases where documentation does not make this clear.  To make this more clear, I will look at loans which have not been closed, and see if they systematically include this information (compared to loans which are closed).  If they do, it's relatively safe to say that these measures are predictions, rather than reports of actual yield.
+
+```{r profit measures, cache=TRUE, warning=FALSE, message=FALSE}
+summary(filter(data, is.na(ClosedDate)))
 ```
 
-It is not immediately clear what distinguishes these lenders, and why they have no recorded credit rating.  The `NA`s have much higher `ListingNumber`s, a slightly higher `Term`, they actually have the following: `EstimatedEffectiveYield`, `EstimatedLoss`, `EstimatedReturn`, `ProsperRating`, `ProsperScore`.  They have a higher `ListingCategory`, a much higher average `EmploymentStatusDuration`, but don't differ too obviously along other measures.  They have lower average `PublicRecordsLast12Months`, significantly more `TotalProsperPaymentsBilled` and `OnTimeProsperPayments`, and a much lower average `LoanCurrentDaysDelinquent`.  They have a lower `LoanMonthsSinceOrigination` and a higher `LoanNumber`.  They are the only ones less than fully funded (`PercentFunded`).  They have relatively little investment from friends (`InvestmentFromFriendsAmount`).  
+All of these open loans have non-zero values assigned to the following measures, suggesting that these measures are predictive rather than descriptive of actual outcomes: `LenderYield`, `EstimatedEffectiveYield`, `EstimatedLoss`, `EstimatedReturn`.  On the other hand, many open loans have zero values assigned for these profit measures: `LP_CustomerPayments`, `LP_CustomerPrincipalPayments`, `LP_InterestandFees`, `LP_ServiceFees`, `LP_CollectionFees`, `LP_GrossPrincipalLoss`, `LP_NetPrincipalLoss`, and `LP_NonPrincipalRecoverypayments` (in fact, the last 3 have only zero values assigned).  These I will take a closer look at.
 
-```{r credit grade by account date}
-library(lubridate)
+#### Relationship Between Measures
 
-data %>%
-  group_by(CreditGrade) %>%
-  summarize_if(is.Date, min, na.rm=TRUE)
+Here, I quickly want to look at how well-correlated the numerical factors associated with profit are, to see if I need to look at all of them when seeing how predictive demographic factors are of profit.  I expect, in any case, that the most productive factors to look at are `EstimatedEffectiveYield` (an overall view of how much lenders profit), `EstimatedLoss` (as this separately looks at principal loss), and `LoanCurrentDaysDelinquent` (as delinquency, even if the loan is ultimately paid, is likely of interest to lenders).
 
-data %>%
-  group_by(CreditGrade) %>%
-  summarize_if(is.Date , max, na.rm=TRUE)
-
-library(skimr)
-
-skim(filter(data,is.na(CreditGrade)))
-
-skim(filter(data,!is.na(CreditGrade)))
-
-```
-
-This may be more useeful - NAs had listing created and closed later, although there was some amount of overlap, so it's not clear if there's an obvious separating factor.  The major difference seems to be that 
-
-### How Correlated are Profit Factors?
-
-Here, I quickly want to look at how well-correlated the numerical factors associated with profit are, to see if I need to look at all of them when seeing how predictive demographic factors are of profit.
-
-```{r profit correlation plot}
-profit <- c("LenderYield", "EstimatedEffectiveYield", "EstimatedLoss", "EstimatedReturn", "CurrentDelinquencies", "AmountDelinquent", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent", "LP_GrossPrincipalLoss", "LP_NetPrincipalLoss","ProsperRating.num")
+```{r profit correlation plot, cache=TRUE}
+profit <- c("LenderYield", "EstimatedEffectiveYield", "EstimatedLoss", "LoanCurrentDaysDelinquent", "LP_GrossPrincipalLoss", "LP_NetPrincipalLoss","ProsperRating.num")
 
 library(ggcorrplot)
 
@@ -141,15 +174,88 @@ ggcorrplot(corr, hc.order = TRUE, type = "lower",
      outline.col = "white", lab = TRUE)
 ```
 
-It turns out that most of the potential profit measures are not that well-correlated.  Several, however, are well-correlated with each other (poisitively or negatively), and I expect these to likely be better representations of profit (as, if a potential measure of profit correlates with no other potential measures of profit, then it it unlikely to represent profit well, unless it is the single accurate measure of profit in the bunch, which is unlikely).
+It turns out that most of the potential profit measures are not that well-correlated.  Several, however, are well-correlated with each other (positively or negatively), and I expect these to likely be better representations of profit (as, if a potential measure of profit correlates with no other potential measures of profit, then it it unlikely to represent profit well, unless it is the single accurate measure of profit in the bunch, which is unlikely).
 
 The profit measures showing the highest correlations with other measures are the following: `EstimatedReturn`, `EstimatedEffectiveYield`, `EstimatedLoss`, `LenderYield`, and `ProsperRating`.  It's likely that the other measures are informative for other, more specific, questions, but at a first glance, it makes sense to look at the most obvious measures of profit.  It's also possible that `LoanStatus`, previously looked at, is also informative, but it has a more indirect relationship to profit (especially given that, as a category, it is inherently in flux).
+
+It is possible that measures of delinquency - `LoanCurrentDaysDelinquent`,`OnTimeProsperPayments`,`CurrentDelinquencies`, and `AmountDelinquent` would affect lenders' willingness to engage with clients regardless of ultimate gain, or loss, particularly for lenders who rely on a regular 'income.'  In this case, it would also be worth looking at how much the various demographic predictors correlate with these measures, particularly as they do not seem to be reflected by the Prosper rating (or other measures).
+
+It is not clear to me exactly what `LP_GrossPrincipalLoss` and `LP_NetPrincipalLoss` mean, so I will not look at them for now.  In addition, both seem reasonably well-correlated with one of the delinquency measures.
+
+#### `EstimatedReturn` vs. `EstimatedEffectiveYield`
+
+```{r estimated return vs. effective yield, cache=TRUE}
+ggplot(data, aes(x = EstimatedReturn, y = EstimatedEffectiveYield)) + 
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  stat_smooth(n=2000) +
+  labs(title = "EstimatedReturn by EstimatedEffectiveYield") +
+  ylim(-0.5,0.5)
+```
+
+
+#### `EstimatedReturn` vs. `EstimatedLoss`
+
+```{r estimated return vs. estimated loss, cache=TRUE}
+ggplot(filter(data, !is.na(EstimatedReturn) & !is.na(EstimatedLoss)), aes(x = EstimatedReturn, y = EstimatedLoss)) + 
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "EstimatedReturn by EstimatedLoss") + 
+  ylim(0,0.5)
+```
+
+#### `EstimatedReturn` vs. `LenderYield`
+
+```{r estimated return vs. lender yield, cache=TRUE}
+ggplot(data, aes(x = EstimatedReturn, y = LenderYield)) + 
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "EstimatedReturn by LenderYield") + 
+  ylim(-0.1,0.5)
+```
+
+#### `EstimatedEffectiveYield` vs. `EstimatedLoss`
+
+```{r effective yield vs. estimated loss, cache=TRUE}
+ggplot(data, aes(x = EstimatedEffectiveYield, y = EstimatedLoss)) + 
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "EstimatedEffectiveYield by EstimatedLoss") + 
+  ylim(0,0.5)
+```
+
+#### `EstimatedEffectiveYield` vs. `LenderYield`
+
+```{r effective yield vs. lender yield, cache=TRUE}
+ggplot(data, aes(x = EstimatedEffectiveYield, y = LenderYield)) + 
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "EstimatedEffectiveYield by LenderYield") + 
+  ylim(-0.1,0.5)
+```
+
+#### `EstimatedLoss` vs. `LenderYield`
+
+```{r estimated loss vs. lender yield, cache=TRUE}
+ggplot(data, aes(x = EstimatedLoss, y = LenderYield)) + 
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "EstimatedLoss by LenderYield") + 
+  ylim(-0.1,0.5)
+```
+
+This is one of the more interesting graphs - it shows clearly that while lender yield increases with estimated loss, at higher levels of loss, the yield ceases to increase, and levels off, or even drops slightly towards higher levels of loss.
 
 ### Occupation vs. Profit
 
 If credit grades are only assigned once the fate of the loan is known, it may be more useful to look at how predictive pre-existing factors such as `Occupation` are of profit measures.
 
-```{r profit by occupation}
+```{r profit by occupation, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","Occupation")
 
 plot_data <- data[subset] %>% 
@@ -170,7 +276,7 @@ There are too many occupations to make easy generalizations.  Occupations would 
 
 ### Income Range vs. Profit
 
-```{r profit by income range}
+```{r profit by income range, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","IncomeRange")
 
 plot_data <- data[subset] %>% 
@@ -192,9 +298,9 @@ Here, it can be seen that as income rises, the `ProsperRating` increases, and ot
 
 Here, I will look at the relationship between other predictors and profit measures.
 
-`EmploymentStatus`
+#### `EmploymentStatus`
 
-```{r profit by employment status}
+```{r profit by employment status, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","EmploymentStatus")
 
 plot_data <- data[subset] %>% 
@@ -210,9 +316,11 @@ ggplot(plot_data, aes(x = EmploymentStatus, y=Value)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`EmploymentStatusDuration`
+What it looks like here is that Prosper ratings are highest for those employed, and employed full-time (it's not clear what the difference is), lower for those who are self-employed, retired, work part-time, or 'other,' and much lower for those not employed.  `LenderYield`, `EstimatedEffectiveYield`, and `EstimatedReturn`, however, are highest for those not employed, likely reflecting the higher anticipated interest charged to people in that group.  `Estimated Loss`, correspondingly, is also highest for those not employed - there's higher potential profit if the loans are paid back, but also significantly more risk.
 
-```{r profit by employment status duration}
+#### `EmploymentStatusDuration`
+
+```{r profit by employment status duration, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","EmploymentStatusDuration")
 
 plot_data <- data[subset] %>% 
@@ -221,16 +329,18 @@ plot_data <- data[subset] %>%
   gather(Measure, Value, -EmploymentStatusDuration)
 
 ggplot(plot_data, aes(x = EmploymentStatusDuration, y=Value)) +
-  geom_bar(stat = "identity") +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
   labs(title = "Profit by EmploymentStatusDuration") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`IsBorrowerHomeowner`
+#### `IsBorrowerHomeowner`
 
-```{r profit by homeowner}
+```{r profit by homeowner, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","IsBorrowerHomeowner")
 
 plot_data <- data[subset] %>% 
@@ -246,9 +356,9 @@ ggplot(plot_data, aes(x = IsBorrowerHomeowner, y=Value)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`FirstRecordedCreditLine`
+#### `FirstRecordedCreditLine`
 
-```{r profit by first credit line}
+```{r profit by first credit line, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","FirstRecordedCreditLine")
 
 plot_data <- data[subset] %>% 
@@ -257,16 +367,18 @@ plot_data <- data[subset] %>%
   gather(Measure, Value, -FirstRecordedCreditLine)
 
 ggplot(plot_data, aes(x = FirstRecordedCreditLine, y=Value)) +
-  geom_bar(stat = "identity") +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
   labs(title = "Profit by FirstRecordedCreditLine") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`OpenRevolvingAccounts`
+#### `OpenRevolvingAccounts`
 
-```{r profit by open revolving accounts}
+```{r profit by open revolving accounts, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","OpenRevolvingAccounts")
 
 plot_data <- data[subset] %>% 
@@ -275,16 +387,18 @@ plot_data <- data[subset] %>%
   gather(Measure, Value, -OpenRevolvingAccounts)
 
 ggplot(plot_data, aes(x = OpenRevolvingAccounts, y=Value)) +
-  geom_bar(stat = "identity") +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
   labs(title = "Profit by OpenRevolvingAccounts") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`InquiriesLast6Months`
+#### `InquiriesLast6Months`
 
-```{r profit by credit inquiries}
+```{r profit by credit inquiries, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","InquiriesLast6Months")
 
 plot_data <- data[subset] %>% 
@@ -293,16 +407,18 @@ plot_data <- data[subset] %>%
   gather(Measure, Value, -InquiriesLast6Months)
 
 ggplot(plot_data, aes(x = InquiriesLast6Months, y=Value)) +
-  geom_bar(stat = "identity") +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
   labs(title = "Profit by InquiriesLast6Months") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`RevolvingCreditBalance`
+#### `RevolvingCreditBalance`
 
-```{r profit by revolving credit balance}
+```{r profit by revolving credit balance, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","RevolvingCreditBalance")
 
 plot_data <- data[subset] %>% 
@@ -311,16 +427,18 @@ plot_data <- data[subset] %>%
   gather(Measure, Value, -RevolvingCreditBalance)
 
 ggplot(plot_data, aes(x = RevolvingCreditBalance, y=Value)) +
-  geom_bar(stat = "identity") +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
   labs(title = "Profit by RevolvingCreditBalance") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`BankcardUtilization`
+#### `BankcardUtilization`
 
-```{r profit by bank card use}
+```{r profit by bank card use, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","BankcardUtilization")
 
 plot_data <- data[subset] %>% 
@@ -329,16 +447,18 @@ plot_data <- data[subset] %>%
   gather(Measure, Value, -BankcardUtilization)
 
 ggplot(plot_data, aes(x = BankcardUtilization, y=Value)) +
-  geom_bar(stat = "identity") +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
   labs(title = "Profit by BankcardUtilization") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`TotalTrades`
+#### `TotalTrades`
 
-```{r profit by total trades}
+```{r profit by total trades, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","TotalTrades")
 
 plot_data <- data[subset] %>% 
@@ -347,16 +467,18 @@ plot_data <- data[subset] %>%
   gather(Measure, Value, -TotalTrades)
 
 ggplot(plot_data, aes(x = TotalTrades, y=Value)) +
-  geom_bar(stat = "identity") +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
   labs(title = "Profit by TotalTrades") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`DebtToIncomeRatio`
+#### `DebtToIncomeRatio`
 
-```{r profit by debt to income ratio}
+```{r profit by debt to income ratio, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","DebtToIncomeRatio")
 
 plot_data <- data[subset] %>% 
@@ -365,16 +487,18 @@ plot_data <- data[subset] %>%
   gather(Measure, Value, -DebtToIncomeRatio)
 
 ggplot(plot_data, aes(x = DebtToIncomeRatio, y=Value)) +
-  geom_bar(stat = "identity") +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
   labs(title = "Profit by DebtToIncomeRatio") +
   facet_grid(~Measure, scales="free") +
   coord_flip() + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`IncomeVerifiable`
+#### `IncomeVerifiable`
 
-```{r profit by whether income verifiable}
+```{r profit by whether income verifiable, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","IncomeVerifiable")
 
 plot_data <- data[subset] %>% 
@@ -390,9 +514,9 @@ ggplot(plot_data, aes(x = IncomeVerifiable, y=Value)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`TotalProsperLoans`
+#### `TotalProsperLoans`
 
-```{r profit by total prosper loans}
+```{r profit by total prosper loans, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","TotalProsperLoans")
 
 plot_data <- data[subset] %>% 
@@ -408,9 +532,9 @@ ggplot(plot_data, aes(x = TotalProsperLoans, y=Value)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-`LoanOriginationQuarter`
+#### `LoanOriginationQuarter`
 
-```{r profit by loan orig. quarter}
+```{r profit by loan orig. quarter, cache=TRUE}
 subset <- c("EstimatedReturn", "EstimatedEffectiveYield", "EstimatedLoss", "LenderYield", "ProsperRating.num","LoanOriginationQuarter")
 
 plot_data <- data[subset] %>% 
@@ -428,22 +552,339 @@ ggplot(plot_data, aes(x = LoanOriginationQuarter, y=Value)) +
 
 Ultimately, without knowing how the loans ultimately panned out, it is a bit difficult to use this data to make future predictions.
 
+### Demographics vs. Delinquency
+
+First, I want to see which Prosper ratings I see delinquency with.
+
+#### `Occupation`
+
+```{r delinquency by occupation, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","Occupation")
+
+plot_data <- data[subset] %>% 
+  group_by(Occupation) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  mutate(Occupation = reorder(Occupation, OnTimeProsperPayments, mean)) %>%
+  gather(Measure, Value, -Occupation)
+
+ggplot(plot_data, aes(x = Occupation, y=Value)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Delinquency by Occupation") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+There are too many occupations to make easy generalizations.  Occupations would likely need to be grouped into a smaller number of categories.  However, one can observe general trends - those with higher-paying occupations (or occupational prospects) seem to be more profitable customers.  On the other hand, students in general are among the bank's least profitable customers.  This suggests that income, which is grouped in a more sensible manner, may be useful to look at.
+
+#### `IncomeRange`
+
+```{r delinquency by income range, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","IncomeRange")
+
+plot_data <- data[subset] %>% 
+  group_by(IncomeRange) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -IncomeRange)
+
+ggplot(plot_data, aes(x = IncomeRange, y=Value)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Delinquency by IncomeRange") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Here, it can be seen that as income rises, the `ProsperRating` increases, and other measures of profit decrease.  **As we have seen, `ProsperRating` correlates with credit score and likelihood of not defaulting**. This suggests that high-income lenders are lower-risk, but lower-income lenders, while being higher-risk, can also yield more profit.
+
+#### `EmploymentStatus`
+
+```{r delinquency by employment status, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","EmploymentStatus")
+
+plot_data <- data[subset] %>% 
+  group_by(EmploymentStatus) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -EmploymentStatus)
+
+ggplot(plot_data, aes(x = EmploymentStatus, y=Value)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Delinquency by EmploymentStatus") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+What it looks like here is that Prosper ratings are highest for those employed, and employed full-time (it's not clear what the difference is), lower for those who are self-employed, retired, work part-time, or 'other,' and much lower for those not employed.  `LenderYield`, `EstimatedEffectiveYield`, and `EstimatedReturn`, however, are highest for those not employed, likely reflecting the higher anticipated interest charged to people in that group.  `Estimated Loss`, correspondingly, is also highest for those not employed - there's higher potential profit if the loans are paid back, but also significantly more risk.
+
+#### `EmploymentStatusDuration`
+
+```{r delinquency by employment status duration, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","EmploymentStatusDuration")
+
+plot_data <- data[subset] %>% 
+  group_by(EmploymentStatusDuration) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -EmploymentStatusDuration)
+
+ggplot(plot_data, aes(x = EmploymentStatusDuration, y=Value)) +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "Delinquency by EmploymentStatusDuration") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `IsBorrowerHomeowner`
+
+```{r delinquency by homeowner, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","IsBorrowerHomeowner")
+
+plot_data <- data[subset] %>% 
+  group_by(IsBorrowerHomeowner) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -IsBorrowerHomeowner)
+
+ggplot(plot_data, aes(x = IsBorrowerHomeowner, y=Value)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Delinquency by IsBorrowerHomeowner") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `FirstRecordedCreditLine`
+
+```{r delinquency by first credit line, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","FirstRecordedCreditLine")
+
+plot_data <- data[subset] %>% 
+  group_by(FirstRecordedCreditLine) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -FirstRecordedCreditLine)
+
+ggplot(plot_data, aes(x = FirstRecordedCreditLine, y=Value)) +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "Delinquency by FirstRecordedCreditLine") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `OpenRevolvingAccounts`
+
+```{r delinquency by open revolving accounts, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","OpenRevolvingAccounts")
+
+plot_data <- data[subset] %>% 
+  group_by(OpenRevolvingAccounts) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -OpenRevolvingAccounts)
+
+ggplot(plot_data, aes(x = OpenRevolvingAccounts, y=Value)) +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "Delinquency by OpenRevolvingAccounts") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `InquiriesLast6Months`
+
+```{r delinquency by credit inquiries, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","InquiriesLast6Months")
+
+plot_data <- data[subset] %>% 
+  group_by(InquiriesLast6Months) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -InquiriesLast6Months)
+
+ggplot(plot_data, aes(x = InquiriesLast6Months, y=Value)) +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "Delinquency by InquiriesLast6Months") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `RevolvingCreditBalance`
+
+```{r delinquency by revolving credit balance, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","RevolvingCreditBalance")
+
+plot_data <- data[subset] %>% 
+  group_by(RevolvingCreditBalance) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -RevolvingCreditBalance)
+
+ggplot(plot_data, aes(x = RevolvingCreditBalance, y=Value)) +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "Delinquency by RevolvingCreditBalance") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `BankcardUtilization`
+
+```{r delinquency by bank card use, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","BankcardUtilization")
+
+plot_data <- data[subset] %>% 
+  group_by(BankcardUtilization) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -BankcardUtilization)
+
+ggplot(plot_data, aes(x = BankcardUtilization, y=Value)) +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "Delinquency by BankcardUtilization") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `TotalTrades`
+
+```{r delinquency by total trades, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","TotalTrades")
+
+plot_data <- data[subset] %>% 
+  group_by(TotalTrades) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -TotalTrades)
+
+ggplot(plot_data, aes(x = TotalTrades, y=Value)) +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "Delinquency by TotalTrades") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `DebtToIncomeRatio`
+
+```{r delinquency by debt to income ratio, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","DebtToIncomeRatio")
+
+plot_data <- data[subset] %>% 
+  group_by(DebtToIncomeRatio) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -DebtToIncomeRatio)
+
+ggplot(plot_data, aes(x = DebtToIncomeRatio, y=Value)) +
+  geom_point() + 
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(formula = y~x) +
+  labs(title = "Delinquency by DebtToIncomeRatio") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `IncomeVerifiable`
+
+```{r delinquency by whether income verifiable, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","IncomeVerifiable")
+
+plot_data <- data[subset] %>% 
+  group_by(IncomeVerifiable) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -IncomeVerifiable)
+
+ggplot(plot_data, aes(x = IncomeVerifiable, y=Value)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Delinquency by IncomeVerifiable") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `TotalProsperLoans`
+
+```{r delinquency by total prosper loans, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","TotalProsperLoans")
+
+plot_data <- data[subset] %>% 
+  group_by(TotalProsperLoans) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -TotalProsperLoans)
+
+ggplot(plot_data, aes(x = TotalProsperLoans, y=Value)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Delinquency by TotalProsperLoans") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### `LoanOriginationQuarter`
+
+```{r delinquency by loan orig. quarter, cache=TRUE}
+subset <- c("AmountDelinquent", "CurrentDelinquencies", "OnTimeProsperPayments", "LoanCurrentDaysDelinquent","LoanOriginationQuarter")
+
+plot_data <- data[subset] %>% 
+  group_by(LoanOriginationQuarter) %>% 
+  summarize_all(funs(mean(., na.rm = TRUE))) %>%
+  gather(Measure, Value, -LoanOriginationQuarter)
+
+ggplot(plot_data, aes(x = LoanOriginationQuarter, y=Value)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Delinquency by LoanOriginationQuarter") +
+  facet_grid(~Measure, scales="free") +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Ultimately, without knowing how the loans ultimately panned out, it is a bit difficult to use this data to make future predictions.
+
+
+
 ## Final Plots and Summary
 
-You will select three plots from your analysis to polish and share in this section. The three plots should show different trends and should be polished with appropriate labels, units, and titles (see the Project Rubric for more information).
+What is notable above is that in each graph where there is a noticeable relationship between profit predictors and profit measures, the Prosper rating is inversely correlated with the profit measures.  What is also notable is that there is a consistent relationship between lender yield, and lender loss: the more the lender stands to gain, the more they stand to lose.  I look at this in more detail below.  What is also notable is that estimated effective yield is **always** a bit less than both the estimated yield, reflecting also the estimated loss.
 
-```{r final plot 1, echo=FALSE}
+Assuming that the various profit measures, which may reflect only profit for clients/lenders, rather than for the company itself, are in fact what we want to be looking at, it is possible to notice certain trends which may be worth looking at more closely.
+
+Further, assuming that lenders also care about potential missed payments, particularly if this would put them in a financial bind, it is worth looking at strong demographic predictors of delinquency, which does not appear to be reflected in the Prosper rating.
+
+<!-- You will select three plots from your analysis to polish and share in this section. The three plots should show different trends and should be polished with appropriate labels, units, and titles (see the Project Rubric for more information). -->
+
+### Lender yield by estimated loss
+
+```{r final plot 1, cache=TRUE}
 
 ```
 
-```{r final plot 2, echo=FALSE}
+### Lender profit by number of open revolving accounts
+
+```{r final plot 2, cache=TRUE}
 
 ```
 
-```{r final plot 3, echo=FALSE}
+### Lender profit by loan origination quarter
+
+```{r final plot 3, cache=TRUE}
 
 ```
 
 ## Reflection
 
-This should contain a few sentences about your struggles, successes, and ideas for future exploration on the data set (see the Project Rubric for more information).
+<!-- This should contain a few sentences about your struggles, successes, and ideas for future exploration on the data set (see the Project Rubric for more information). -->
+
+First, I encountered a fair bit of trouble interpreting the data without any background story.  Googling around for info on Prosper loans online, I was able to get a general idea of what the company was doing, which made interpreting the data somewhat easier.
+
+At this point, it is still difficult to say much about this data without knowing, in a lot more detail: what realities the less obvious measures reflect; the story behind the data; how certain measures are gathered and determined; and how the various measures reflect on both profit for the company, and profit for the clients.  What would be needed is to take a much closer and more in-depth look at what the company does, what purpose the data serves, and how the measures were collected and what they reflect.
