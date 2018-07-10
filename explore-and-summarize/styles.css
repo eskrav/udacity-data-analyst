@@ -1,0 +1,19 @@
+.showopt {
+  background-color: white;
+  color: black; 
+  width: 100px;
+  height: 20px;
+  text-align: center;
+  vertical-align: middle !important;
+  float: right;
+  border-radius: 8px;
+}
+
+.showopt:hover {
+    background-color: white;
+    color: black;
+}
+
+pre.plot {
+  background-color: white !important;
+}
