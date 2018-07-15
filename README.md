@@ -9,7 +9,7 @@
 Section | Project | Status |
 --- | --- | ---
 Introductory Project | [Test a Perceptual Phenomenon](./perceptual-phenomenon) | Done 
-Exploratory Data Analysis | Explore and Summarize Data |  
+Exploratory Data Analysis | [Explore and Summarize Data](./explore-and-summarize) | Done
 Data Wrangling | Wrangle and Analyze Data |
 Data Story Telling | Create a Tableau Story |
 ## License

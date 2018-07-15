@@ -1,3 +1,5 @@
+// from https://stackoverflow.com/a/37839683
+
 $(document).ready(function() {
 
   $chunks = $('.fold');

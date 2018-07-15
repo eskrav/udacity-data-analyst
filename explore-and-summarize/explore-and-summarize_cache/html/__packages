@@ -8,10 +8,8 @@ purrr
 dplyr
 stringr
 forcats
-magrittr
-bindrcpp
 scales
-lubridate
-skimr
-ggcorrplot
+gridExtra
+GGally
+bindrcpp
 hexbin

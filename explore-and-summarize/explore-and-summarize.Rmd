@@ -1,12 +1,11 @@
 ---
 title: "Explore and Summarize Data (Prosper Loan Data)"
 author: "Ekaterina Kravtchenko"
-date: "7/1/2018"
+date: "7/15/2018"
 output: 
   html_document:
     toc: true
     toc_float: true
-    toc_depth: 4
     css: styles.css
 ---
 
@@ -15,23 +14,76 @@ output:
 ```{r setup, include=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
-library(magrittr)
 library(scales)
+library(gridExtra)
+library(grid)
+library(GGally)
+
+# a function to calculate summary statistics - adapted from https://stackoverflow.com/a/35954377
+summary_stats <- function(data, group, value) {
+  data %>%
+    group_by(!! sym(group)) %>%
+    summarise(mean = round(mean((!! sym(value)), na.rm = TRUE),3),
+            median = round(median((!! sym(value)), na.rm = TRUE),3),
+            sd = round(sd((!! sym(value)), na.rm = TRUE),3),
+            n = n()) %>%
+    mutate(se = round(sd / sqrt(n),3),
+         lower.ci = round(mean - qt(1 - (0.05 / 2), n - 1) * se,3),
+         upper.ci = round(mean + qt(1 - (0.05 / 2), n - 1) * se,3))
+}
+
+# a function to calculate summary statistics and generate a nicely formatted table from them
+table_stats <- function(data, group, value) {
+  data %>%
+    group_by(!! sym(group)) %>%
+    summarise(mean = round(mean((!! sym(value)), na.rm = TRUE),3),
+            median = round(median((!! sym(value)), na.rm = TRUE),3),
+            sd = round(sd((!! sym(value)), na.rm = TRUE),3),
+            n = n()) %>%
+    mutate(se = round(sd / sqrt(n),3),
+         lower.ci = round(mean - qt(1 - (0.05 / 2), n - 1) * se,3),
+         upper.ci = round(mean + qt(1 - (0.05 / 2), n - 1) * se,3)) %>%
+    grid.table()
+}
+
+# a function to generate summary statistics with two grouping variables
+summary_stats_mult <- function(data, group1, group2, value) {
+  data %>%
+    group_by(!! sym(group1), !! sym(group2)) %>%
+    summarise(mean = round(mean((!! sym(value)), na.rm = TRUE),3),
+            median = round(median((!! sym(value)), na.rm = TRUE),3),
+            sd = round(sd((!! sym(value)), na.rm = TRUE),3),
+            n = n()) %>%
+    mutate(se = round(sd / sqrt(n),3),
+         lower.ci = round(mean - qt(1 - (0.05 / 2), n - 1) * se,3),
+         upper.ci = round(mean + qt(1 - (0.05 / 2), n - 1) * se,3))
+}
+
+# a function to generate nice tables for summary statistics with two grouping variables
+table_stats_mult <- function(data, group1, group2, value) {
+  data %>%
+    group_by(!! sym(group1), !! sym(group2)) %>%
+    summarise(mean = round(mean((!! sym(value)), na.rm = TRUE),3),
+            median = round(median((!! sym(value)), na.rm = TRUE),3),
+            sd = round(sd((!! sym(value)), na.rm = TRUE),3),
+            n = n()) %>%
+    mutate(se = round(sd / sqrt(n),3),
+         lower.ci = round(mean - qt(1 - (0.05 / 2), n - 1) * se,3),
+         upper.ci = round(mean + qt(1 - (0.05 / 2), n - 1) * se,3)) %>%
+    grid.table()
+}
 ```
 
 ## Data Exploration
 
 ```{r data import, message=FALSE, warning=FALSE, cache=TRUE}
-data <- read_csv("prosperLoanData.csv") %>% mutate_if(is.character, as.factor)
+data <- read_csv("prosperLoanData.csv") %>% 
+  mutate_if(is.character, as.factor)
 ```
-
-<!-- a. Headings and text should organize your thoughts and reflect your analysis as you explored the data. -->
-<!-- b. Plots in this analysis do not need to be polished with labels, units, and titles; these plots are exploratory (quick and dirty). They should, however, be of the appropriate type and effectively convey the information you glean from them. -->
-<!-- c. You can iterate on a plot in the same R chunk, but you don’t need to show every plot iteration in your analysis. -->
 
 ### Data Cleaning
 
-Above, I imported the character columns as factors, as having taken a closer look at the data, they are labels for categories, rather than strings (in the following analysis, I don't find any disconfirmation of this).  The first thing I will do now is take a closer look at the data, and see if other columns are formatted appropriately:
+Above, I imported the character columns as factors, as having taken a closer look at the data, they are labels for categories, rather than character strings (in the following analysis, I don't find any disconfirmation of this).  The first thing I will do now is take a closer look at the data, and see if other columns are formatted appropriately:
 
 <div class="fold o">
 ```{r data glimpse, cache=TRUE, warning=FALSE, message=FALSE}
@@ -40,9 +92,10 @@ str(data)
 ```
 </div>
 
-The first thing I notice is that there are several date columns which should be formatted as such, and several boolean (True/False) type columns.  `ListingCategory.num` is actually a category label, not a numeric measure.  I also want to order the levels in some of the factor columns, as they are inherently ordered (`CreditGrade`, `ProsperRating.alpha`, `IncomeRange`, `LoanOriginationQuarter`).  Several of the columns have spaces or special characters in the column names, which makes it difficult to refer to these columns - I will rename these.
+The first thing I notice is that there are several date columns which should be formatted as such, and several boolean (True/False) type columns.  `ListingCategory.num` is actually a category label, not a numeric measure, unfortunately without a key to disambiguate the labels.  I also want to order the levels in some of the factor columns, as they are inherently ordered (`CreditGrade`, `ProsperRating.alpha`, `IncomeRange`, `LoanOriginationQuarter`).  Several of the columns have spaces or special characters in the column names, which makes it difficult to refer to these columns - I will rename these.
 
 ```{r basic data cleaning, cache=TRUE}
+# changes variable types and names, where appropriate
 data %<>% 
   mutate_at(c("ListingCreationDate","ClosedDate","DateCreditPulled","FirstRecordedCreditLine","LoanOriginationDate"), as.Date) %>%
   mutate_at(c("IsBorrowerHomeowner","CurrentlyInGroup","IncomeVerifiable"), as.logical) %>%
@@ -51,6 +104,7 @@ data %<>%
   rename_all(~sub(" (percentage)", ".per", ., fixed=TRUE)) %>%
   mutate_at("ListingCategory.num", as.factor)
 
+# orders factor levels, where appropriate
 data$CreditGrade <- ordered(data$CreditGrade, c("NC","HR","E","D","C","B","A","AA"))
 data$ProsperRating.alpha <- ordered(data$ProsperRating.alpha, c("NC","HR","E","D","C","B","A","AA"))
 data$IncomeRange <- ordered(data$IncomeRange, c("Not displayed","Not employed","$0","$1-24,999","$25,000-49,999","$50,000-74,999","$75,000-99,999","$100,000+"))
@@ -73,26 +127,27 @@ summary(data)
 ```
 </div>
 
-I first see that there's a lot of missing data in many of the columns - it's not clear to me immediately whether this indicates that the data for those rows is truly missing (but theoretically could have been gathered), or if the information in those columns was simply not applicable to those rows.  I will sort this out as I move through the data, but I want to see if some information is, for example, only entered once the loan has been closed or completed.  First, though, I will identify the factors of interest.
+I first see that there's a lot of missing data in many of the columns - it's not clear to me immediately whether this indicates that the data for those rows was simply never collected, or if the information in those columns was not applicable to the observations in those rows.  In some cases, this is indicated in the document linked in the section below, which lists and describes the variables in this data set.  I will sort this out as I move through the data, but I want to see if some information is, for example, only entered once the loan has been closed or completed.  First, though, I will identify the factors of interest.
 
-#### Factors of Interest
+#### Variables of Interest
 
-Prosper Loans, through cursory research (https://en.wikipedia.org/wiki/Prosper_Marketplace), appears to be a peer-to-peer lending company.  The primary concern of companies is profit, and in this case, as I see no obvious measure of profit to the company itself, I will focus on profit to the lender (the lenders, presumably, keep the company in business).  Of course, borrowers likewise keep the company in business, and given the measures collected, it's possible to at least take a look at how borrower demographics influence loan funding.  Variable names are cross-referenced with a document linked from the Kaggle site: https://docs.google.com/spreadsheets/d/1gDyi_L4UvIrLTEC6Wri5nbaMmkGmLQBk-Yx3z0XDEtI/edit#gid=0.
+Prosper Loans, through very cursory research (https://en.wikipedia.org/wiki/Prosper_Marketplace), appears to be a peer-to-peer lending company.  The primary concern of companies is profit, and in this case, as I see no obvious measure of profit to the company itself, I will focus on profit to the lender (the lenders, presumably, keep the company in business).  Of course, borrowers also keep the company in business, and given the measures collected, it's possible to at least take a look at how borrower demographics influence loan funding, payments, and interest rates.  Variable names are cross-referenced with a document linked from the Kaggle data page: https://docs.google.com/spreadsheets/d/1gDyi_L4UvIrLTEC6Wri5nbaMmkGmLQBk-Yx3z0XDEtI/edit#gid=0.
 
-The factors of most interest to lenders, I assume, might be (for example) `LoanStatus` (whether a loan is in good standing, repaid, or written off, etc.), `LenderYield` (yield minus servicing fee), `EstimatedEffectiveYield` (yield minus servicing fee and uncollected interest, and plus late fees) - likely more informative than the preceding, `EstimatedReturn` (overall estimated return, taking into account both estimated yield, and estimated loss), `EstimatedLoss` (loss on charge-offs), `LoanCurrentDaysDelinquent`, `LP_GrossPrincipalLoss`, and `LP_NetPrincipalLoss`.  These seem most indicative of how much lenders might profit, or lose, from any particular borrower.  What the lender should care most about, overall, is the ability to predict whether (or to what degree) a given (current or future) loan will pay off.  In some cases, it is unclear from the documentation whether these are predictions assigned by Prosper at the outset, or descriptions of what actually happened during the course of loans.  Exploring the data might shed some light on this.
+The variables of most interest to lenders, I assume, might be (for example) `LoanStatus` (whether a loan is in good standing, repaid, or written off, etc.), `LenderYield` (yield minus servicing fee), `EstimatedEffectiveYield` (yield minus servicing fee and uncollected interest, and plus late fees) - likely more informative than the preceding, `EstimatedReturn` (overall estimated return, taking into account both estimated yield, and estimated loss), `EstimatedLoss` (loss on charge-offs), `LoanCurrentDaysDelinquent`, `LP_GrossPrincipalLoss`, and `LP_NetPrincipalLoss`.  These seem most indicative of how much lenders might profit, or lose, from any particular borrower.  What the lender should care most about, overall, is the ability to predict whether (or to what degree) a given (current or future) loan will pay off.  In some cases, it is unclear from the documentation whether these are predictions assigned by Prosper at the outset, or descriptions of what actually happened during the course of loan repayment  Exploring the data might shed some light on this.
 
-On the other hand, the factors I intuitively expect might be predictive of profit are the following (for example): `CreditGrade` (credit assigned when the listing went live), `ProsperRating` (rating assigned when the loan went live), `ProsperScore` (risk score), `EstimatedReturn` (predicted difference between estimated effective yield and estimated loss), `ListingCategory` (what the loan is for), `Occupation`, `EmploymentStatus`, `EmploymentStatusDuration`, `IsBorrowerHomeowner`, `CreditScoreRangeLower`/`CreditScoreRangeUpper`, `FirstRecordedCreditLine`, `CurrentCreditLines`, `OpenCreditLines`, `TotalCreditLinespast7years`, `OpenRevolvingAccounts`, `OpenRevolvingMonthlyPayment`, `InquiriesLast6Months`, `TotalInquiries`, `CurrentDelinquencies`, `AmountDelinquent`, `DelinquenciesLast7Years`, `PublicRecordsLast10Years`, `PublicRecordsLast12Months`, `RevolvingCreditBalance`, `BankcardUtilization`, `AvailableBankcardCredit`, `TotalTrades` (number of trade lines ever opened), `TradesNeverDelinquent`, `TradesOpenedLast6Months`, `DebtToIncomeRatio`, `IncomeRange`, `IncomeVerifiable`, `StatedMonthlyIncome`, `TotalProsperLoans` (prior Prosper loans), `TotalProsperPaymentsBilled` (presumably, number of payments billed at time of listing), `OnTimeProsperPayments` (number of on-time payments at time of listing), `ProsperPaymentsLessThanOneMonthLate`, `ProsperPaymentsOneMonthPlusLate`, `ProsperPrincipalBorrowed` (amount borrowed at time of listing), `ProsperPrincipalOutstanding` (amount outstanding at time of listing), `Recommendations` (number of recommendations at time of listing), `InvestmentFromFriendsCount` (number of friends investing), and`InvestmentFromFriendsAmount` (amount invested by friends), and `Investors` (total number of investors).  There are too many of these categories, and I expect to narrow the list I will look at down to a few, particularly when multiple measures reflect more-or-less the same thing, or don't show any distinct patterns of correlating with other variables.
+On the other hand, the variables I intuitively expect might be predictive of profit are the following (for example): `CreditGrade` (credit assigned when the listing went live), `ProsperRating` (rating assigned when the loan went live), `ProsperScore` (risk score), `EstimatedReturn` (predicted difference between estimated effective yield and estimated loss), `Occupation`, `EmploymentStatus`, `EmploymentStatusDuration`, `IsBorrowerHomeowner`, `CreditScoreRangeLower`/`CreditScoreRangeUpper`, `FirstRecordedCreditLine`, `CurrentCreditLines`, `OpenCreditLines`, `TotalCreditLinespast7years`, `OpenRevolvingAccounts`, `OpenRevolvingMonthlyPayment`, `InquiriesLast6Months`, `TotalInquiries`, `CurrentDelinquencies`, `AmountDelinquent`, `DelinquenciesLast7Years`, `PublicRecordsLast10Years`, `PublicRecordsLast12Months`, `RevolvingCreditBalance`, `BankcardUtilization`, `AvailableBankcardCredit`, `TotalTrades` (number of trade lines ever opened), `TradesNeverDelinquent`, `TradesOpenedLast6Months`, `DebtToIncomeRatio`, `IncomeRange`, `IncomeVerifiable`, `StatedMonthlyIncome`, `TotalProsperLoans` (prior Prosper loans), `TotalProsperPaymentsBilled` (presumably, number of payments billed at time of listing), `OnTimeProsperPayments` (number of on-time payments at time of listing), `ProsperPaymentsLessThanOneMonthLate`, `ProsperPaymentsOneMonthPlusLate`, `ProsperPrincipalBorrowed` (amount borrowed at time of listing), `ProsperPrincipalOutstanding` (amount outstanding at time of listing), `Recommendations` (number of recommendations at time of listing), `InvestmentFromFriendsCount` (number of friends investing), and`InvestmentFromFriendsAmount` (amount invested by friends), and `Investors` (total number of investors).  There are too many variables to look at up front, and I expect to narrow the list I will look at down to a portion of these, particularly when multiple measures appear likely to reflect more-or-less the same thing.
 
-With respect to loan funding, some of the same predictors likely also influence loan amounts and borrower funding, as most likely reflected by `BorrowerAPR`, `BorrowerRate`, `LoanOriginalAmount`, `MonthlyLoanPayment`, `Term` (the length of the loan), and `PercentFunded` (although this is likely to not be informative for recently created loans).
+With respect to loan funding, some of the same predictors likely also influence approved loan amounts and borrower funding, as most likely reflected by `BorrowerAPR`, `BorrowerRate`, `LoanOriginalAmount`, `MonthlyLoanPayment`, `Term` (the length of the loan), and `PercentFunded` (although this is likely to not be informative for recently created loans).
 
 The borrowers and loans are primary indexed through the variables `MemberKey` and `LoanNumber`.  Additional variables for keeping track of loans include `LoanOriginationDate` and `LoanOriginationQuarter`.  `ClosedDate` is useful for quickly indexing loans which have been closed, and for which firm conclusions can be drawn as to how much lenders profited.
 
 #### NA Values
 
-Here I want to double-check why information might be missing (e.g., whether some variables are assigned only once a loan has been closed).
+Here I want to look more closely at why information might be missing (e.g., whether some variables are assigned a value only once a loan has been closed).
 
 <div class="fold o">
 ```{r loan completion, cache=TRUE}
+# prints out two columns with the percent of data missing, per variable, in portions of the data set with either closed loans, or open loans
 closed <- round(colMeans(is.na(filter(data, !is.na(ClosedDate))))*100,2)
 not_closed <- round(colMeans(is.na(filter(data, is.na(ClosedDate))))*100,2)
 data.frame(closed, not_closed)
@@ -101,11 +156,29 @@ data.frame(closed, not_closed)
 
 The first thing I notice is that whether a loan is closed, or not, is quite, but in most cases not entirely, predictive of whether missing values are present, or not.
 
+##### Loan Origination Quarter
+
+Only a few of these values are missing, but this data should be present.  Here, it is clear from the listing creation date and loan origination date that the missing values are from the last quarter of 2005.  I will assign the NA cells the value `"Q4 2005"`.
+
+<div class="fold o">
+```{r fix quarter, message=FALSE, warning=FALSE, cache=TRUE}
+summary(filter(data, is.na(LoanOriginationQuarter)))
+
+data$LoanOriginationQuarter <- fct_explicit_na(data$LoanOriginationQuarter, "Q4 2005")
+
+# reorders the loan origination quarter levels
+data$LoanOriginationQuarter <- ordered(data$LoanOriginationQuarter, c("Q4 2005", "Q1 2006", "Q2 2006", "Q3 2006", "Q4 2006", "Q1 2007", "Q2 2007", "Q3 2007", "Q4 2007", "Q1 2008", "Q2 2008", "Q3 2008", "Q4 2008", "Q1 2009", "Q2 2009", "Q3 2009", "Q4 2009", "Q1 2010", "Q2 2010", "Q3 2010", "Q4 2010", "Q1 2011", "Q2 2011", "Q3 2011", "Q4 2011", "Q1 2012", "Q2 2012", "Q3 2012", "Q4 2012", "Q1 2013", "Q2 2013", "Q3 2013", "Q4 2013", "Q1 2014", "Q2 2014", "Q3 2014", "Q4 2014"))
+```
+</div>
+
+##### Credit Grade
+
 None of the open loans have a credit grade, while about half of the closed loans do.  I assume that those which do are post-July 2009 loans, which were never assigned a credit grade.
 
 <div class="fold o">
 ```{r closed credit grade, cache=TRUE, message=FALSE, warning=FALSE}
-summary(filter(data, !is.na(ClosedDate) & is.na(CreditGrade)))
+summary(filter(data, !is.na(ClosedDate) & 
+                     is.na(CreditGrade)))
 ```
 </div>
 
@@ -113,44 +186,56 @@ Here, I see that at least one loan prior to 2009 has no credit grade.
 
 <div class="fold o">
 ```{r closed credit grade old, cache=TRUE, message=FALSE, warning=FALSE}
-summary(filter(data, !is.na(ClosedDate) & is.na(CreditGrade) & ListingCreationDate < "2009-07-01"))
+summary(filter(data, 
+               !is.na(ClosedDate) & 
+               is.na(CreditGrade) & 
+               ListingCreationDate < "2009-07-01"))
 ```
 </div>
 
-I see that 130 loans are missing a credit grade for no apparent reason.  I don't see any pattern here, and assume that it is impossible right now for me to tell why this data is missing.  However, this is a relatively small amount of data.
+I ultimately see that 130 loans are missing a credit grade for no apparent reason.  I don't see any pattern here, and assume that it is impossible right now for me to tell why this data is missing.  However, this is a relatively small amount of data.
 
-I am otherwise assuming that `CreditGrade` was effectively replaced by `ProsperScore` in 2009, and that these can be used more-or-less interchangeably, particularly given that their labels correspond.
+I am otherwise assuming that `CreditGrade` was effectively replaced by `ProsperRating` 2009, and that these can be used more-or-less interchangeably, particularly given that their labels correspond.
+
+##### Profit Estimates
 
 Next, I notice that only about half of the closed loans have estimated effective lender yields or several other estimates of yield/loss, although they are not closed.  I assume these are pre-July 2009 listings, but I want to take a closer look at them.
 
 <div class="fold o">
 ```{r lender yield NA, cache=TRUE, message=FALSE, warning=FALSE}
-summary(filter(data, !is.na(ClosedDate) & is.na(EstimatedEffectiveYield)))
+summary(filter(data, !is.na(ClosedDate) & 
+                     is.na(EstimatedEffectiveYield)))
 ```
 </div>
 
-That is indeed the case, and as the same percentage of the other similar measures is missing, I will assume this is also the case for those measures.
+That is indeed the case, and as the same percentage of the other similar measures (which were also assigned only starting in 2009) is missing, I will assume this is also the case for those measures.
 
-I see that some borrower demographic, employment, and previous credit information is missing, but I assume that this is simply missing data, with no larger story behind it, particularly as this is a relatively small percentage of loans.  I also see that more of this information is missing for loans that have been closed, which suggests to me that this data was either lost, or not gathered as thoroughly in the past.
+##### Other Data
 
-The majority of the borrowers in both categories have no prior Prosper history, and it would be interesting to see if, for example, not having any Prosper history leads to more delinquencies than having positive Prosper history.
+I see that some borrower demographic, employment, and previous credit information is missing, but I assume that this is simply missing data, with no larger story behind it, particularly as this is a relatively small percentage of loans.  I also see that more of this information is missing for loans that have been closed, which suggests to me that this data may have been either lost, or not gathered as thoroughly in the past.
 
-Most loans were not charged off, but about 30% of closed loans at least at some point became delinquent (`LoanFirstDefaultedCycleNumber`).  A very small number of open loans are delinquent.
+The majority of the borrowers in both categories have no prior Prosper history, and it would be interesting to see if, for example, not having any Prosper history leads to more chargeoffs or delinquencies than having positive Prosper history.
+
+Most loans were not charged off or defaulted, but about 30% of closed loans at least at some point became delinquent (`LoanFirstDefaultedCycleNumber`).  A very small number of open loans are delinquent.
 
 ## Lender Profit
 
-At this point, I want to take a look, through plotting correlations, at how predictive the above background, financial, or demographic measures are of measures most closely related to lender profit.
+At this point, I want to take a look, through plotting correlations between variables, at how predictive the above background, financial, or demographic measures are of those measures most closely related to lender profit.
 
 ### `LoanStatus` vs. `CreditGrade`/`ProsperRating`
 
-In the case of `LoanStatus`, as this is not a quantitative or clearly ordered factor, it may make sense to at least visually organize some of the levels.  I therefore 'group' all `Past Due` levels together, and order the levels loosely in terms of 'goodness' - assuming that being on time, or having paid off the loan, is 'good,' and that having defaulted, or having the loan charged off, is 'bad.'  I group `CreditGrade` and `ProsperRating` into one measure, and then plot `LoanStatus` by this new rating, to see if there are any obvious patterns on how likely one is to have a particular loan status, given a particular starting rating.
+In the case of `LoanStatus`, as this is not a quantitative or clearly ordered factor, it may make sense to at least visually organize some of the labels.  I therefore 'group' all `Past Due` levels together, and order the labels loosely in terms of 'goodness' - assuming that being on time, or having paid off the loan, is 'good,' and that having defaulted, or having the loan charged off, is 'bad.'  I group `CreditGrade` and `ProsperRating` into one measure (`Rating`), and then plot `LoanStatus` against this new rating, to see if there are any obvious patterns, in terms of how likely one is to have a particular loan status, given a particular rating:
 
-```{r first impressions, cache=TRUE}
+```{r first impressions, echo=FALSE, message=FALSE, warning=FALSE}
 pastDue <- levels(data$LoanStatus)[7:12]
 
+# combines credit grade and prosper ratings into a single new column
+data <-  mutate(data, Rating = coalesce(CreditGrade, ProsperRating.alpha))
+
+# collapses past due levels into one level, orders loan status levels, and calculates percentages of each loan status per Prosper rating
 plot_data <- data %>% 
   mutate(LoanStatus = fct_recode(LoanStatus, "PastDue" = pastDue[1], "PastDue" = pastDue[2], "PastDue" = pastDue[3], "PastDue" = pastDue[4], "PastDue" = pastDue[5], "PastDue" = pastDue[6])) %>%
-  mutate(Rating = coalesce(CreditGrade, ProsperRating.alpha)) %>%
+  filter(!is.na(Rating)) %>%
   mutate(LoanStatus = ordered(LoanStatus, c("Defaulted","Chargedoff","PastDue","Cancelled","Current","FinalPaymentInProgress","Completed"))) %>%
   group_by(Rating, LoanStatus) %>% 
   tally %>% 
@@ -158,19 +243,15 @@ plot_data <- data %>%
 
 ggplot(plot_data, aes(x = LoanStatus, y = percent)) +
   geom_bar(stat = "identity") +
-  geom_text(aes(label = percent(percent)), hjust = -0.25) +
-  labs(title = "Loan Status by Rating", y = "Percent", x = "Loan Status") +
-  scale_y_continuous(labels = percent, limits = c(0,1)) +
-  scale_x_discrete(labels = function(x) str_wrap(x, 10)) +
   facet_wrap(~Rating) +
   coord_flip()
 ```
 
-What I see here is that the higher the rating, the greater the likelihood that the loan is either completed or current, and the less the likelihood that it is past due, charged off, or defaulted.  Overall, it seems that a customer with a higher rating at the time the loan is posted will indeed be more likely to pay off a loan in the future.
+What I see here is that the higher the rating, the greater the likelihood that the loan is either completed or current, and the less the likelihood that it is past due, charged off, or defaulted.  Overall, it seems that a customer with a higher Prosper rating at the time the loan is posted will indeed be more likely to pay off a loan in the future.  I will look at this plot more closely in the final section.
 
 ### Exploring Profit Measures
 
-First, I want to get a sense of when these measures might be getting assigned, in cases where documentation does not make this clear.  To make this more clear, I will look at loans which have not been closed, and see if they systematically include this information (compared to loans which are closed).  If they do, it's relatively safe to say that these measures are predictions, rather than reports of actual yield.
+First, I want to get a sense of when these measures might be getting assigned, in cases where documentation does not make this clear.  I will look at loans which have not been closed, to see see if they systematically include this information (in addition to loans which have been closed).  If they do, it's relatively safe to say that these measures are predictions, rather than reports of actual yield.
 
 <div class="fold o">
 ```{r profit measures, cache=TRUE, warning=FALSE, message=FALSE}
@@ -178,58 +259,88 @@ summary(filter(data, is.na(ClosedDate)))
 ```
 </div>
 
-All of these open loans have non-zero values assigned to the following measures, suggesting that these measures are predictive rather than descriptive of actual outcomes: `LenderYield`, `EstimatedEffectiveYield`, `EstimatedLoss`, `EstimatedReturn`.  On the other hand, many open loans have zero values assigned for these profit measures: `LP_CustomerPayments`, `LP_CustomerPrincipalPayments`, `LP_InterestandFees`, `LP_ServiceFees`, `LP_CollectionFees`, `LP_GrossPrincipalLoss`, `LP_NetPrincipalLoss`, and `LP_NonPrincipalRecoverypayments` (in fact, the last 3 have only zero values assigned).  These I will take a closer look at.
+All of these open loans have non-zero values assigned to the following measures, suggesting that these measures are predictive, rather than descriptive of actual outcomes: `LenderYield`, `EstimatedEffectiveYield`, `EstimatedLoss`, `EstimatedReturn`.  On the other hand, many open loans have zero values assigned for these profit measures: `LP_CustomerPayments`, `LP_CustomerPrincipalPayments`, `LP_InterestandFees`, `LP_ServiceFees`, `LP_CollectionFees`, `LP_GrossPrincipalLoss`, `LP_NetPrincipalLoss`, and `LP_NonPrincipalRecoverypayments` (in fact, the last 3 have *only* zero values assigned).  These I will take a closer look at.
+
+#### `LP_CustomerPayments`
 
 <div class="fold o">
 ```{r profit measures with zero, cache=TRUE, warning=FALSE, message=FALSE}
+# data where there are no customer payments
 summary(filter(data, LP_CustomerPayments==0))
-summary(filter(data, !is.na(ClosedDate) & LP_CustomerPayments==0))
-summary(filter(data, !is.na(ClosedDate) & LP_CustomerPayments==0 & LoanStatus=="Completed"))
-
-summary(filter(data, LoanStatus=="Completed" & LP_CustomerPayments==0))
+# closed loans with no customer payments
+summary(filter(data, !is.na(ClosedDate) & 
+                     LP_CustomerPayments==0))
+# closed completed loans with no customer payments
+summary(filter(data, !is.na(ClosedDate) & 
+                     LP_CustomerPayments==0 & 
+                     LoanStatus=="Completed"))
+# all completed loans with no customer payments
+summary(filter(data, LoanStatus=="Completed" & 
+                     LP_CustomerPayments==0))
 ```
 </div>
 
-The one thing I notice is that the majority of these loans originated in 2014.  Most, but not all, are still open.  Other `LP` values for most of them are 0.  Of those that are closed, most were either charged off, defaulted, or cancelled - only 10 were completed.  Of those that were completed, all are from the same loan origination quarter, have the same number of months since the loan originated, and are assigned loan numbers adjacent to each other.  All `LP` values are 0.
+The one thing I notice is that the majority of loans without customer payments originated in 2014.  Most, but not all, are still open.  Other `LP` values for most of them are 0.  Of those that are closed, most were either charged off, defaulted, or cancelled - only 10 were completed.  Of those that were completed, all are from the same loan origination quarter, have the same number of months since the loan originated, and are assigned loan numbers adjacent to each other.  All `LP` values are 0.
 
 If the loan has been completed, then with the exception of those 10 records, all customers have made payments.
 
-This leads me to strongly suspect that for this group of loans, the data is simply missing, perhaps through system error.  I therefore tentatively conclude that for this measure the value is 0 only for those borrowers whole loans are still open, or whole loans were charged off, defaulted, or cancelled.
+This leads me to strongly suspect that for this group of 10 loans, the data is simply missing, perhaps through system error.  I therefore tentatively conclude that for this measure ,the value is 0 only for those borrowers whole loans are still open, or whole loans were charged off, defaulted, or cancelled.
+
+#### `LP_CollectionFees`, `LP_NetPrincipalLoss`, `LP_NonPrincipalRecoverypayments`
 
 <div class="fold o">
 ```{r profit measures with zero 2, cache=TRUE, warning=FALSE, message=FALSE}
+# loans with collection fees
 summary(filter(data, LP_CollectionFees!=0))
-
+# loans with principal loss
 summary(filter(data, LP_NetPrincipalLoss!=0))
-
+# loans with non-principal recovery payments
 summary(filter(data, LP_NonPrincipalRecoverypayments!=0))
-summary(filter(data, !is.na(ClosedDate) & LP_NonPrincipalRecoverypayments==0))
-summary(filter(data, !is.na(ClosedDate) & LP_NonPrincipalRecoverypayments==0 & LoanStatus=="Completed"))
+# closed loans with no non-principal recovery payments
+summary(filter(data, !is.na(ClosedDate) &
+                     LP_NonPrincipalRecoverypayments==0))
+# closed and completed loans with no non-principal recovery payments
+summary(filter(data, !is.na(ClosedDate) &
+                     LP_NonPrincipalRecoverypayments==0 &
+                     LoanStatus=="Completed"))
 ```
 </div>
 
-What I see here is that `LP_CollectionFees` is non-0 primarily for people with poor credit grades or prosper ratings, and disproportionately for those whose loans have been charged off or defaulted.  All of them have apparently paid collection fees.
+What I see here is that `LP_CollectionFees` is non-0 primarily for loans with poor credit grades or Prosper ratings, and disproportionately for those whose loans have been charged off or defaulted.  All of the borrowers have apparently paid collection fees.
 
-All records where `LP_NetPrincipalLoss` is 0 were either charged off, or defaulted.  Likewise, all records where `LP_NonPrincipalRecoverypayments` is 0 were charged off or defaulted.
+All loans where `LP_NetPrincipalLoss` is 0 were either charged off, or defaulted.  Likewise, all loans where `LP_NonPrincipalRecoverypayments` is 0 were charged off or defaulted.
 
-All this leads me to provisionally conclude that the `LP-` records reflect actual, not predicted, measures of whether or to what extent a loan was repaid, and not predicted payments, and further that these measures accurately reflect **what they are meant to measure, for all customers**.
+All this leads me to provisionally conclude that the `LP-` variables reflect actual, rather than predicted measures of whether or to what extent a loan has been repaid, and further that the data seems to be reasonably complete and consistent (I examine it more closely in the following sections).
 
 ### Determining Relevant Measures
 
-I am primarily interested at looking at how well predictors of lender or borrower profit (so to say) correlate with actual profit.  For this, I will exclude loans that are currently open, although it would for example be possible to look at how well various predictors correlate with likelihood of being current or past due.
+I am planning to primarily look at how well predictors of lender profit correlate with actual profit.  For this purpose, I will exclude loans that are currently open, since in those cases the profit is unknown, although it would for example also be possible to look at how well these predictors correlate with the likelihood of loans being current or past due.
 
-The most relevant outcomes for lenders seem to be the following: `LoanStatus` (current of end status of the loan), `LP_CustomerPayments` (cumulative payments made by customers, prior to any charge-offs), `LoanOriginalAmount` (what the original loan was for, for determining percentage lost/repaid), and `LP_NetPrincipalLoss` (amount still uncollected after recoveries).  `LP_ServiceFees` and `LP_CollectionFees` are also relevant to determing final yield/loss, and can be added to `LP_NetPrincipalLoss` to approximate total loss.  Here I will create a new variable to consolidate the yield and loss measures I am interested in, so as to avoid unecessary and (for current purposes) uninteresting complexity in plotting outcomes.  I will also take a closer look at data where either yield seems relatively extreme.
+The most relevant outcomes for lenders seem to be the following: `LoanStatus` (current or end status of the loan), `LP_CustomerPayments` (cumulative payments made by customers, prior to any charge-offs), `LoanOriginalAmount` (for determining percentage lost/repaid), and `LP_NetPrincipalLoss` (amount still uncollected after recoveries).  `LP_ServiceFees` and `LP_CollectionFees` are also relevant to determining final yield/loss, and can be added to `LP_NetPrincipalLoss` to approximate total loss.
+
+Here I will create a new variable to consolidate the yield and loss measures that I am interested in, so as to avoid unnecessary and (for my current purposes) relatively uninteresting complexity in plotting outcomes.  I will also take a closer look at data where yield or loss seem relatively extreme.
 
 <div class="fold o">
 ```{r new profit measure, warning=FALSE, message=FALSE, cache=TRUE}
-relevant_data <- data %>%
+# creates new data subset of only closed loans (those for which lender profit can be calculated); creates new measure of overall lender yield from collected yield and loss measures; creates new variable that simply states whether a loan is complete, or not, and creates its numerical boolean variable
+lender_data <- data %>%
   filter(LoanStatus %in% c("Cancelled","Chargedoff","Completed","Defaulted")) %>%
-  mutate(PercentYield = ((LoanOriginalAmount-LP_NetPrincipalLoss+LP_ServiceFees+LP_CollectionFees+LP_NonPrincipalRecoverypayments+LP_InterestandFees)/LoanOriginalAmount)-1) %>%
-  mutate(Completed = factor(ifelse(LoanStatus=="Completed","Completed","Not Completed")))
+  mutate(PercentYield = (
+    (LoanOriginalAmount-LP_NetPrincipalLoss+LP_ServiceFees+LP_CollectionFees+LP_NonPrincipalRecoverypayments+LP_InterestandFees)
+    /LoanOriginalAmount)
+    -1) %>%
+  mutate(Completed = factor(ifelse(LoanStatus=="Completed","Completed","Not Completed"))) %>%
+  mutate(Completed.num = as.numeric(Completed=="Completed"))
 
-relevant_data[c(1,4,5),] %>% select(LoanOriginalAmount, starts_with("LP_"),PercentYield, Completed) %>% rowid_to_column() %>% gather(var, value, -rowid) %>% spread(rowid, value) %>% print(n = Inf)
+# check that calculation done correctly:
+lender_data[c(1,4,5),] %>% 
+  select(LoanOriginalAmount, starts_with("LP_"), PercentYield, Completed) %>% 
+  rowid_to_column() %>% 
+  gather(var, value, -rowid) %>% 
+  spread(rowid, value) %>% 
+  print(n = Inf)
 
-summary(relevant_data)
+summary(lender_data)
 ```
 </div>
 
@@ -237,238 +348,306 @@ Everything seems to check out with the `PercentYield` calculation.
 
 <div class="fold o">
 ```{r profit measure extremes, warning=FALSE, message=FALSE, cache=TRUE}
-summary(filter(relevant_data, PercentYield > 1))
-summary(filter(relevant_data, PercentYield < -1))
+# extreme gains
+summary(filter(lender_data, PercentYield > 1))
+# extreme losses
+summary(filter(lender_data, PercentYield < -1))
 ```
 </div>
 
-For `PercentYield`, extreme gains seem to be cases of loans being defaulted or charged off, but fully, or almost fully recovered with large interest payments.
+For the `PercentYield` measure, extreme gains seem to be cases of loans being either defaulted on or charged off - but fully, or almost fully recovered, with large interest payments.
 
-Extreme losses are due to loans that were charged off - where no payments were ever made or recovered, but investors lost money on collection fees.  Overall, this data appears sensible.
+Extreme losses are due to loans that were charged off - where no payments were ever made or recovered, and where investors lost money on collection fees.  Overall, the data looks sensible.
 
-Now I want to take a closer look at the relationship between this measure, and the other primary measure of interest: loan status.
+Now I want to take a closer look at the relationship between this measure, and the other primary measure of interest: `LoanStatus`.
 
 #### `LoanStatus` by `PercentYield`
 
-```{r loan status by percent yield}
-relevant_data %>% group_by(LoanStatus) %>% ggplot(aes(x = LoanStatus, y = PercentYield)) + geom_boxplot() + labs(title = "PercentYield by LoanStatus", y = "Percent Yield", x = "Loan Status") + scale_y_continuous(labels = percent)
+```{r loan status by percent yield, echo=FALSE}
+# function to plot categorical against continuous variables, producing a side-by-side boxplot and bar plot
+cat_by_cont <- function(data, xcol, ycol) {
+  p <- data %>% ggplot(aes_string(x = xcol, y = ycol))
+  grid.arrange(p + geom_boxplot(), 
+               p + geom_bar(stat="summary", fun.y="mean"), 
+               ncol = 2)
+}
+
+cat_by_cont(lender_data, "LoanStatus", "PercentYield")
 ```
 
-Here it can be seen that cancelled loans do nor result in any money gained or lost by the lender, that lenders earn on average 20% on top of their initial investment for completed loans, and that thy lose about 50% of their original investment, on average, for charged off or defaulted loans, signifying that lenders may be taking a substantial risk, particularly with loans that are likely to be defaulted on or charged off.
+```{r loan status by percent yield table, cache=TRUE, fig.height=1.75}
+table_stats(lender_data, "LoanStatus", "PercentYield")
+```
 
-Average `PercentYield` is roughly equal between loans that have been charged off, and those that defaulted, suggesting that the relevant measure here might be simply whether the loan was completed, or not (if one doesn't want to take into account the possibility that loans defaulted on will still be repaid at some point).
+Here it can be seen that cancelled loans do nor result in any money gained or lost by the lender, that lenders earn on average around 20% on top of their initial investment for completed loans, and that they lose about 50% of their original investment, on average, for charged off or defaulted loans, signifying that lenders may be taking a substantial risk by investing, particularly with loans that are likely to be defaulted on or charged off.  As the confidence intervals in the table above show, this trend is distinct and stable.
+
+Since only 5 loans in the relevant data set were ever cancelled, I will exclude this category from further analysis.
+
+```{r need cancelled loans, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+# filter out cancelled loans
+lender_data <- lender_data %>% filter(LoanStatus!="Cancelled")
+```
+
+The interquartile range and average values of `PercentYield` are roughly equal between loans that have been charged off, and those that have been defaulted on, suggesting that the relevant measure might be simply whether the loan was completed, or not (although ultimately, loans defaulted on may still be repaid at some point).
 
 <div class="fold o">
 ```{r chargeoff vs default, cache=TRUE}
-summary(filter(relevant_data, LoanStatus == "Chargedoff"))
-summary(filter(relevant_data, LoanStatus == "Defaulted"))
+# look more closely at loans charged off
+summary(filter(lender_data, LoanStatus == "Chargedoff"))
+# look more closely at loans defaulted on
+summary(filter(lender_data, LoanStatus == "Defaulted"))
 ```
 </div>
 
-There's no clear difference between loans charged off, and loans defaulted, aside from charged off loans being at least 121 days delinquent (defaulted loans may be any number of days delinquent).  Loans that were charged off tend to be created and closed slightly later.  For all purposes, however, it may make sense to treat these two categories as identical, for now.
+There's no clear difference between these categories on most measures, aside from charged off loans being at least 121 days delinquent (loans defaulted on may be any number of days delinquent).  Loans that were charged off tend to be created and closed slightly later.  For all purposes, however, it may make sense to treat these two categories as identical, at least in the course of exploratory analysis.
 
 ### Predicted Profit
 
-Now, before using them as predictors of actual profit, I want to briefly look at the relationship between measures of predicted profit: predicted loss, and predicted yield.  In this case, `EstimatedEffectiveYield` vs. `EstimatedLoss` seems to be the most informative comparison - how much one stands to gain, total, vs. how much one stands to lose.
+Before using them as predictors of actual yield, I want to briefly look at the relationship between measures of predicted loss or yield.  In this case, `EstimatedEffectiveYield` vs. `EstimatedLoss` seem to be the most relevant measures - how much one stands to gain, in total, vs. how much one stands to lose.
+
+Here, and in following cases where I plot correlations between two quantitative variables, I model the trend using both a standard linear regression (orange line), which makes the sometimes obviously inaccurate assumption that the relationship is linear, and a `GAM`, or general additive model (blue line), which uses smooth functions to capture non-linearities ([https://en.wikipedia.org/wiki/Generalized_additive_model]).  I also compute a Pearson correlation for each relationship ([https://en.wikipedia.org/wiki/Pearson_correlation_coefficient]) - which unfortunately also assumes a linear relationship, but should be informative regarding the main issue that I am concerned with: whether higher values of one variable correspond to higher values in the other variable, regardless of the exact shape of the relationship.
 
 #### `EstimatedEffectiveYield` vs. `EstimatedLoss`
 
-```{r effective yield vs. estimated loss, cache=TRUE, warning=FALSE, message=FALSE}
-ggplot(data, aes(x = EstimatedEffectiveYield, y = EstimatedLoss)) + 
+```{r effective yield vs. estimated loss, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+# function to produce simple hex plot, to plot correlations between to quantitative variables - shows trends a bit better than simple scatterplot, given amount of data
+# gam (general additive model) fits are in blue, lm (linear regression) fits are in organge.
+simple_hex <- function(data, x, y) {
+  ggplot(data, aes_string(x, y)) + 
   geom_hex(bins = 50) + 
-  geom_smooth(formula = y~x)
+  geom_smooth(formula = y~x) + 
+  geom_smooth(formula = y~x, method=lm, color="orange")
+}
+
+simple_hex(data, "EstimatedEffectiveYield", "EstimatedLoss")
 ```
-
-This plot shows that, as one would expect, when the estimated effective yield (taking into account fees or possibly lost interest on charge-offs) is around or below zero, the estimated loss rises.  It also interestingly shows that as the estimated effective yield rises, so does the estimated loss.  Presumably based on historical data, then, Prosper predicts that the more one stands to gain, the more one stands to lose.  Lowest estimated risk of loss seems to be around 5% effective yield.
-
-#### `EstimatedLoss` vs. `LenderYield`
-
-```{r estimated loss vs. lender yield, cache=TRUE, warning=FALSE, message=FALSE}
-ggplot(data, aes(x = EstimatedLoss, y = LenderYield)) + 
-  geom_hex(bins = 50) + 
-  geom_smooth(formula = y~x)
-```
-
-This graph shows clearly that while predicted lender yield increases with predicted loss, at higher levels of loss, the yield ceases to increase, and levels off, or even drops slightly towards higher levels of predicted loss.  This is presumably due to the fact that those loans which lenders profit the most from tend to be higher-interest loans - with those customers who are charged higher interest rates typically being those most likely to fail to repay their loan.
-
-What one would expect, then, in terms of actual profit, is that as borrower demographics 'worsen' and interet rates rise, lenders are both more likely to lose, and to stand a chance of earning more.
-
-### Scores vs. Actual Profit
-
-#### `Rating`
-
-##### `LoanStatus`
-
-First, only 5 loans in the relevant data set were ever cancelled, so I will exclude this category from analysis.
-
 
 <div class="fold o">
-```{r need cancelled loans, cache=TRUE, warning=FALSE, message=FALSE}
-relevant_data %>%
-  filter(LoanStatus=="Cancelled")
-
-relevant_data <- relevant_data %>%
-  filter(LoanStatus!="Cancelled")
+```{r effective yield vs. estimated loss cor, cache=TRUE, warning=FALSE, message=FALSE}
+# for simplicity, although many of the relationships here do not appear simply linear, I assume linear correlations - the main question for this preliminary exploration is usually only whether one variable generally causes the other to increase, or decrease
+cor.test(data$EstimatedEffectiveYield, data$EstimatedLoss, method = "pearson")
 ```
 </div>
 
+This plot shows that, as one would expect, when the estimated effective yield (taking into account fees or lost interest on charge-offs) is around or below zero, the estimated loss rises.  It also interestingly shows that as the estimated effective yield rises, so does the estimated loss ($r=0.80$, $p<.001$).  Presumably based on historical data, then, Prosper predicts that the more one stands to gain, the more one stands to lose.  Likely this is due to higher projected profits for higher-interest loans, which tend to be given to customers who cannot qualify for better terms (due, for example, to poor credit or financial insecurity).  Lowest estimated risk of loss seems to be around 5% effective yield.
 
-```{r loan status by rating, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(Rating = coalesce(CreditGrade, ProsperRating.alpha)) %>%
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted"))) %>%
+#### `EstimatedLoss` vs. `LenderYield`
+
+```{r estimated loss vs. lender yield, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(data, "EstimatedLoss", "LenderYield")
+```
+
+<div class="fold o">
+```{r estimated loss vs. lender yield cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(data$EstimatedLoss, data$LenderYield, method = "pearson")
+```
+</div>
+
+This plot shows clearly that while predicted lender yield increases with predicted loss ($r=0.95$, $p<.001$), at higher levels of predicted loss, the yield ceases to increase, and levels off, or even drops slightly towards higher levels of predicted loss.  This is again presumably due to the fact that those loans which lenders profit the most from tend to be higher-interest loans - with those customers who are charged higher interest rates presumably also typically being those most likely to fail to repay their loan.
+
+What one would expect, then, in terms of actual profit, is that as borrower demographics increasingly reflect traits that typically correspond to lower likelihood of repayment, and interest rates rise, lenders are both more likely to lose, and to stand a chance of earning more.  The question then is if lenders profit from taking this risk, on average.
+
+### Scores vs. Actual Profit
+
+First, I want to quickly look at whether `Rating` and `ProsperScore` (post-2009) are correlated:
+
+```{r rating vs score, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+qplot(ProsperRating.num, ProsperScore, data = lender_data, geom=c("point", "jitter")) + 
+  geom_smooth(formula = y~x, method=lm, color="orange")
+```
+
+<div class="fold o">
+```{r rating vs score cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$ProsperRating.num, lender_data$ProsperScore, method = "pearson")
+```
+</div>
+
+Overall, these variables are clearly correlated ($r=0.77$, $p<.001$), with higher (more favorable) risk scores disproportionately assigned to loans with higher ratings.
+
+#### `Rating`
+
+Here I will look at how `Rating` correlates with `LoanStatus` and `PercentYield`, or actual lender yield on past loans (pending any possible repayments on loans defaulted on).
+
+##### `LoanStatus`
+
+```{r loan status by rating, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data %>% 
+  filter(!is.na(Rating)) %>%
   group_by(Rating, LoanStatus) %>% 
   tally %>% 
   mutate(percent = n/sum(n))
 
 ggplot(plot_data, aes(x = LoanStatus, y=percent)) +
   geom_bar(stat = "identity") +
-  labs(title = "Loan Status by Rating") +
   facet_wrap(~Rating) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
+```{r loan status by rating table, cache=TRUE, fig.height=3.5}
+table_stats(lender_data, "Rating", "Completed.num")
+```
+
 ##### `PercentYield`
 
-```{r lender profit by rating, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(Rating = coalesce(CreditGrade, ProsperRating.alpha)) %>%
+```{r lender profit by rating, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data %>% 
+  filter(!is.na(Rating)) %>%
   group_by(Rating) %>%
   summarize(PercentYield = mean(PercentYield))
 
 ggplot(plot_data, aes(x = Rating, y=PercentYield)) +
   geom_bar(stat = "identity")
 ```
-<div class="fold o">
-```{r rating NA, warning=FALSE, message=FALSE}
-relevant_data %>% 
-  mutate(Rating = coalesce(CreditGrade, ProsperRating.alpha)) %>%
-  filter(is.na(Rating)) %>%
-  summary()
 
-relevant_data %>% 
-  mutate(Rating = coalesce(CreditGrade, ProsperRating.alpha)) %>%
-  filter(!is.na(Rating)) %>%
-  summary()
+```{r lender profit by rating table, cache=TRUE, fig.height=3.5}
+table_stats(lender_data, "Rating", "PercentYield")
 ```
-</div>
 
-It's not clear what distinguishes the `NA` Prosper ratings from others, whether this rating was assigned from the beginning, or why loans in this category are so profitable.  These loans were all created in 2009 and 2010, however.
+Overall, loans with higher Prosper ratings are much more likely to be repaid (confidence intervals show that this trend is reliable), and, on average (without taking into account other predictors of profit), they are the only loans that lenders actually profit on.
+
+Overall, as there does not look to be a great difference between loans that were charged off or defaulted on, as discussed above, I will from now on treat the two categories as identical, and simply look at whether loans were completed, or not.
 
 #### `ProsperScore`
 
-##### `LoanStatus`
+Here I will look at how `ProsperScore` correlates with lender profit.  Higher Prosper scores should lead to higher chances of repayment, as they correspond to lower risk.
 
-```{r loan status by score, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
+##### `Completed`
 
-ggplot(plot_data, aes(x = LoanStatus, y = ProsperScore)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
-  labs(title = "Loan Status by ProsperScore")
+```{r loan status by score, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "ProsperScore")
 ```
 
-As can be seen, loans that were completed had the best risk score, although those that were charged off or defaulted are not markedly lower.
+```{r loan status by score table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "ProsperScore")
+```
+
+As can be seen, loans that were completed had higher (better) risk scores, although those that were not are not markedly lower.
 
 ##### `PercentYield`
 
-```{r lender profit by score, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = factor(ProsperScore), y=PercentYield)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
-  labs(title = "Percent Yield by ProsperScore")
+```{r lender profit by score, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(filter(lender_data, !is.na(ProsperScore)), "factor(ProsperScore)", "PercentYield")
 ```
+
+```{r lender profit by score table, cache=TRUE, fig.height=3.75}
+table_stats(filter(lender_data, !is.na(ProsperScore)), "ProsperScore", "PercentYield")
+```
+
+Overall, it's clear that lenders on average profit more from loans with higher Prosper scores, and that there is less variability in how much lenders yield (whether high or low) when the Prosper score is high.  It can also be seen, however, that lenders profit relatively little from borrowers with the highest score (11), and that borrowers with slightly lower scores are on average more profitable, if slightly more risky.
 
 ### Estimated Profit vs. Actual Profit
 
+Here I will look at how `EstimatedEffectiveYield` correlates with lender profit.  Higher estimated yield should correspond to higher profit up to a point, although markedly high estimated yields are likely to be offset by higher likelihood of loans not being repaid.
+
 #### `EstimatedEffectiveYield`
 
-##### `LoanStatus`
+##### `Completed`
 
-```{r loan status by estimated yield, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
+```{r loan status by estimated yield, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "EstimatedEffectiveYield")
+```
 
-ggplot(plot_data, aes(x = LoanStatus, y = EstimatedEffectiveYield)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
-  labs(title = "Loan Status by EstimatedEffectiveYield")
+```{r loan status by estimated yield table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "EstimatedEffectiveYield")
 ```
 
 ##### `PercentYield`
 
-```{r lender profit by estimated yield, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = EstimatedEffectiveYield, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
+```{r lender profit by estimated yield, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "EstimatedEffectiveYield", "PercentYield")
 ```
+
+<div class="fold o">
+```{r lender profit by estimated yield cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$EstimatedEffectiveYield, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Overall, loans not completed had somewhat higher estimated yields.  Similarly, loans with higher estimated yield are both more likely to show higher actual yield, and significant losses.  On average, loans with higher estimated yields are less lucrative ($r=-0.19$, $p<.001$).  For loans under 5% effective yield, there seems to be relatively sparse data.  Average profits appear to start dropping off noticeably around 1.5% estimated yield.
 
 #### `EstimatedLoss`
 
-##### `LoanStatus`
+Here I will look at how `EstimatedLoss` correlates with lender profit.  Higher estimated loss should correspond to lower profit, although this may be partially offset by higher interest rates on higher-risk loans.
 
-```{r loan status by estimated loss, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
+##### `Completed`
 
-ggplot(plot_data, aes(x = LoanStatus, y = EstimatedLoss)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
-  labs(title = "Loan Status by EstimatedLoss")
+```{r loan status by estimated loss, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "EstimatedLoss")
+```
+
+```{r loan status by estimated loss table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "EstimatedLoss")
 ```
 
 ##### `PercentYield`
 
-```{r lender profit by estimated loss, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = EstimatedLoss, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
+```{r lender profit by estimated loss, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "EstimatedLoss", "PercentYield")
 ```
+
+<div class="fold o">
+```{r lender profit by estimated loss cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$EstimatedLoss, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Overall, loans which were not completed had higher estimated loss, as expected.  For `PercentYield`, the average trend is not as clear, but it seems that higher estimated losses are in fact offset partially by higher yields, although the trend is towards greater losses at estimated losses increase ($r=-0.03$, $p<.001$).  At higher levels of estimated loss, data is more sparse and it's more difficult to make firm conclusions.
 
 #### `EstimatedReturn`
 
-##### `LoanStatus`
+Here I will look at how `EstimatedReturn` correlates with lender profit.  Higher estimated return should correspond more profit, as it takes into account potential losses.
 
-```{r loan status by estimated return, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
+##### `Completed`
 
-ggplot(plot_data, aes(x = LoanStatus, y = EstimatedReturn)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
+```{r loan status by estimated return, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "EstimatedReturn")
+```
+
+```{r loan status by estimated return table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "EstimatedReturn")
 ```
 
 ##### `PercentYield`
 
-```{r lender profit by estimated return, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = EstimatedReturn, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
+```{r lender profit by estimated return, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "EstimatedReturn", "PercentYield")
 ```
+
+<div class="fold o">
+```{r lender profit by estimated return cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$EstimatedReturn, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Overall, and somewhat surprisingly, loans that are not completed have marginally higher estimated returns, suggesting that the likelihood of loss is not sufficiently taken into account.  Similarly, yield is more likely to be relatively low at some (positive) values of estimated returns (around 10-15%), again suggesting that predicted measures don't adequately predict losses.  At relatively high ad low ends of estimated returns, it's difficult to make conclusions, due to relatively sparse data.  On average, however, the trend is towards *greater* losses as predicted returns increase ($r=-0.05$, $p<.001$).
+
+In sum, it's not entirely clear how well estimated profit in fact correlates with actual profit, but the plots above suggest that Prosper estimates may not be sufficiently conservative, in terms of predicting lender yield vs. loss.
 
 ### Demographics vs. Actual Profit
 
+First, I quickly want to see how well the numerical demographic variables correlate with each other, as well as whether they correlate with Prosper scores.
+
+```{r demographics cor, fig.width = 22.5, fig.height = 22.5, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+# selects most apparently relevant borrower demographics
+demographics <- c("ProsperRating.num","ProsperScore","EmploymentStatusDuration","CreditScoreRangeLower","CreditScoreRangeUpper","FirstRecordedCreditLine","OpenRevolvingAccounts","InquiriesLast6Months","AmountDelinquent","DelinquenciesLast7Years","RevolvingCreditBalance","BankcardUtilization","DebtToIncomeRatio","TotalTrades","TradesNeverDelinquent.per")
+
+# plots correlations among those borrower demographics and Prosper ratings
+ggpairs(lender_data[demographics], lower = list(continuous = wrap("smooth", color = "blue")))
+```
+
+It's clear that many of these variables correlate highly with each other, and other don't, suggesting that they are underlyingly measuring different things.  The Prosper scores appear to correlate relatively highly with credit scores, but show low to no correlation with other variables.  At the least, it appears that not all demographic variables, aside from credit scores and financial states that are typically reflected by credit scores, contribute much to Prosper ratings.
+
 #### `Occupation`
 
-##### `LoanStatus`
+Here I will look at which occupations correspond to higher lender profit.  One would expect for higher-earning occupations to correspond to higher chances of repayment, and possibly higher profits.
 
-```{r loan status by occupation, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted"))) %>%
-  group_by(LoanStatus, Occupation) %>% 
-  tally() %>%
-  spread(LoanStatus, n) %>%
-  replace_na(list(Completed=0, Chargedoff=0, Defaulted=0)) %>%
-  mutate(percent = Completed/(Completed+Chargedoff+Defaulted)) %>%
+##### `Completed`
+
+```{r loan status by occupation, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data %>% 
+  filter(!is.na(Occupation)) %>%
+  group_by(Occupation) %>% 
+  summarize(percent = mean(Completed=="Completed")) %>%
   mutate(Occupation = reorder(Occupation, percent))
 
 ggplot(plot_data, aes(x = Occupation, y=percent)) +
@@ -479,8 +658,9 @@ ggplot(plot_data, aes(x = Occupation, y=percent)) +
 
 ##### `PercentYield`
 
-```{r lender profit by occupation, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
+```{r lender profit by occupation, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data %>% 
+  filter(!is.na(Occupation)) %>%
   group_by(Occupation) %>% 
   summarize(percent = mean(PercentYield, na.rm=TRUE)) %>%
   mutate(Occupation = reorder(Occupation, percent))
@@ -491,20 +671,18 @@ ggplot(plot_data, aes(x = Occupation, y=percent)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-There are too many occupations to make easy generalizations.  Occupations would likely need to be grouped into a smaller number of categories.  However, one can observe general trends - those with higher-paying occupations (or occupational prospects) seem to be more profitable customers.  On the other hand, students in general are among the bank's least profitable customers.  This suggests that income, which is grouped in a more sensible manner, may be useful to look at.
+There are too many occupations to make easy generalizations - they would likely need to be grouped into a smaller number of categories.  However, one can observe general trends - those with higher-paying occupations (or occupational prospects) seem to be more reliable and more profitable borrowers.  On the other hand, students in general, as well as several other relatively low-earning professions, are among the bank's least profitable customers.  Notably, realtors are neither profitable nor reliable.  If higher earnings are the underlying reason for these trends, one would expect that income categories would show a similar trend.
 
 #### `IncomeRange`
 
-##### `LoanStatus`
+Here I will look at which income ranges correspond to higher lender profit.  Based on the occupation data, one would expect for those with higher earnings to be more profitable and more likely to repay loans.
 
-```{r loan status by income range, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted"))) %>%
-  group_by(LoanStatus, IncomeRange) %>% 
-  tally() %>%
-  spread(LoanStatus, n) %>%
-  replace_na(list(Completed=0, Chargedoff=0, Defaulted=0)) %>%
-  mutate(PercentCompleted = Completed/(Completed+Chargedoff+Defaulted)) %>%
+##### `Completed`
+
+```{r loan status by income range, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data %>% 
+  group_by(IncomeRange) %>% 
+  summarize(PercentCompleted = mean(Completed=="Completed")) %>%
   mutate(IncomeRange = reorder(IncomeRange, PercentCompleted))
 
 ggplot(plot_data, aes(x = IncomeRange, y=PercentCompleted)) +
@@ -513,32 +691,41 @@ ggplot(plot_data, aes(x = IncomeRange, y=PercentCompleted)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-##### `PercentYield`
-
-```{r lender profit by income range, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = IncomeRange, y=PercentYield)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
-  coord_flip() + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```{r loan status by income range table, cache=TRUE, fig.height=3}
+table_stats(lender_data, "IncomeRange", "Completed.num")
 ```
 
-Here, it can be seen that as income rises, the `ProsperRating` increases, and other measures of profit decrease.  **As we have seen, `ProsperRating` correlates with credit score and likelihood of not defaulting**. This suggests that high-income lenders are lower-risk, but lower-income lenders, while being higher-risk, can also yield more profit.
+##### `PercentYield`
+
+```{r lender profit by income range, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data
+
+p<- ggplot(lender_data, aes(x = IncomeRange, y=PercentYield)) +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+grid.arrange(p + geom_boxplot(),
+             p + geom_bar(stat="summary", fun.y="mean"),
+             ncol=2)
+```
+
+```{r lender profit by income range table, cache=TRUE, fig.height=3}
+table_stats(lender_data, "IncomeRange", "PercentYield")
+```
+
+Here, it can be seen that as income rises, average yield increases, and both exceptionally high and low yields become less likely.  The highest-earning categories are fairly reliably profitable on average, and repay their loans at a rate of around 75-80%.
 
 #### `EmploymentStatus`
 
-##### `LoanStatus`
+I expect that those who are employed - particularly employed full time - are more likely to repay loans, and more likely to be profitable, on average.
 
-```{r loan status by employment status, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted"))) %>%
-  group_by(LoanStatus, EmploymentStatus) %>% 
-  tally() %>%
-  spread(LoanStatus, n) %>%
-  replace_na(list(Completed=0, Chargedoff=0, Defaulted=0)) %>%
-  mutate(PercentCompleted = Completed/(Completed+Chargedoff+Defaulted)) %>%
+##### `Completed`
+
+```{r loan status by employment status, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data %>% 
+  filter(!is.na(EmploymentStatus)) %>%
+  group_by(EmploymentStatus) %>% 
+  summarize(PercentCompleted = mean(Completed=="Completed")) %>%
   mutate(EmploymentStatus = reorder(EmploymentStatus, PercentCompleted))
 
 ggplot(plot_data, aes(x = EmploymentStatus, y=PercentCompleted)) +
@@ -547,538 +734,642 @@ ggplot(plot_data, aes(x = EmploymentStatus, y=PercentCompleted)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-##### `PercentYield`
+```{r loan status by employment status table, cache=TRUE, fig.height=3.5}
+# reorders emplyment status labels
+lender_data$EmploymentStatus <- ordered(lender_data$EmploymentStatus, c("Part-time","Employed","Full-time","Retired","Not employed","Self-employed","Not available","Other"))
 
-```{r lender profit by employment status, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = EmploymentStatus, y=PercentYield)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
-  coord_flip() + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+table_stats(filter(lender_data, !is.na(EmploymentStatus)), "EmploymentStatus", "Completed.num")
 ```
 
-What it looks like here is that Prosper ratings are highest for those employed, and employed full-time (it's not clear what the difference is), lower for those who are self-employed, retired, work part-time, or 'other,' and much lower for those not employed.  `LenderYield`, `EstimatedEffectiveYield`, and `EstimatedReturn`, however, are highest for those not employed, likely reflecting the higher anticipated interest charged to people in that group.  `Estimated Loss`, correspondingly, is also highest for those not employed - there's higher potential profit if the loans are paid back, but also significantly more risk.
+##### `PercentYield`
+
+```{r lender profit by employment status, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data %>% 
+  filter(!is.na(EmploymentStatus)) %>%
+  mutate(EmploymentStatus = factor(EmploymentStatus, levels =  c("Other","Not available","Self-employed","Not employed","Retired","Full-time","Employed","Part-time")))
+
+p <- ggplot(plot_data, aes(x = EmploymentStatus, y=PercentYield)) +
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+grid.arrange(p + geom_boxplot(), 
+             p + geom_bar(stat="summary", fun.y="mean"),
+             ncol=2)
+```
+
+```{r lender profit by employment status table, cache=TRUE, fig.height=3.5}
+table_stats(lender_data, "EmploymentStatus", "PercentYield")
+```
+
+Here it looks like, unsurprisingly, employed borrowers are more likely to repay loans, and further that only part- and full-time workers are consistently profitable for lenders.  Those in the general category of 'employed,' however, are not.
 
 #### `EmploymentStatusDuration`
 
-##### `LoanStatus`
+One would expect that longer employment status duration would correspond to more stable employment and higher likelihood of repayment and lender profit.
 
-```{r loan status by employment status duration, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
+##### `Completed`
 
-ggplot(plot_data, aes(x = LoanStatus, y = EmploymentStatusDuration)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
+```{r loan status by employment status duration, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "EmploymentStatusDuration")
+```
+
+```{r loan status by employment status duration table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "EmploymentStatusDuration")
 ```
 
 ##### `PercentYield`
 
-```{r lender profit by employment status duration, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = EmploymentStatusDuration, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
+```{r lender profit by employment status duration, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "EmploymentStatusDuration", "PercentYield")
 ```
-
-#### `IsBorrowerHomeowner`
-
-##### `LoanStatus`
-
-```{r loan status by home ownership, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted"))) %>%
-  group_by(LoanStatus) %>%
-  summarise(percent = mean(IsBorrowerHomeowner, na.rm=TRUE))
-
-ggplot(plot_data, aes(x = LoanStatus, y = percent, cumulative = TRUE)) +
-    geom_col()
-```
-
-##### `PercentYield`
-
-```{r lender profit by home ownership, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = IsBorrowerHomeowner, y=PercentYield)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-#### `CreditScoreRangeLower`
-
-##### `LoanStatus`
-
-```{r loan status by lower credit score, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = CreditScoreRangeLower)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by lower credit score, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = CreditScoreRangeLower, y=PercentYield)) +
-  geom_hex(bins = 25) +
-  geom_smooth(formula = y~x)
-
-plot_data <- relevant_data %>% filter(CreditScoreRangeLower>400)
-
-ggplot(plot_data, aes(x = CreditScoreRangeLower, y=PercentYield)) +
-  geom_hex(bins = 25) +
-  geom_smooth(formula = y~x)
-```
-
-#### `CreditScoreRangeUpper`
-
-##### `LoanStatus`
-
-```{r loan status by upper credit score, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = CreditScoreRangeUpper)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by upper credit score, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = CreditScoreRangeUpper, y=PercentYield)) +
-  geom_hex(bins = 25) +
-  geom_smooth(formula = y~x)
-
-plot_data <- relevant_data %>% filter(CreditScoreRangeUpper>400)
-
-ggplot(plot_data, aes(x = CreditScoreRangeUpper, y=PercentYield)) +
-  geom_hex(bins = 25) +
-  geom_smooth(formula = y~x)
-```
-
-#### `FirstRecordedCreditLine`
-
-##### `LoanStatus`
-
-```{r loan status by first credit line, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = FirstRecordedCreditLine)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by first credit line, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = FirstRecordedCreditLine, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `OpenRevolvingAccounts`
-
-##### `LoanStatus`
-
-```{r loan status by open revolving accounts, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = OpenRevolvingAccounts)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by open revolving accounts, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = OpenRevolvingAccounts, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `InquiriesLast6Months`
-
-##### `LoanStatus`
-
-```{r loan status by inquiries, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = InquiriesLast6Months)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by inquiries, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = InquiriesLast6Months, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `AmountDelinquent`
-
-##### `LoanStatus`
-
-```{r loan status by amount delinquent, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = AmountDelinquent)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by amount delinquent, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = AmountDelinquent, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `DelinquenciesLast7Years`
-
-##### `LoanStatus`
-
-```{r loan status by delinquencies, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = DelinquenciesLast7Years)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by delinquencies, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = DelinquenciesLast7Years, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `RevolvingCreditBalance`
-
-##### `LoanStatus`
-
-```{r loan status by revolving balance, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = RevolvingCreditBalance)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by revolving balance, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = RevolvingCreditBalance, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `BankcardUtilization`
-
-##### `LoanStatus`
-
-```{r loan status by bankcard utilization, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = BankcardUtilization)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by bankcard utilization, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = BankcardUtilization, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `DebtToIncomeRatio`
-
-##### `LoanStatus`
-
-```{r loan status by debt ratio, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = DebtToIncomeRatio)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by debt ratio, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = DebtToIncomeRatio, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `IncomeVerifiable`
-
-##### `LoanStatus`
-
-```{r loan status by income varifiable, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted"))) %>%
-  group_by(LoanStatus) %>%
-  summarise(percent = mean(IncomeVerifiable, na.rm=TRUE))
-
-ggplot(plot_data, aes(x = LoanStatus, y = percent, cumulative = TRUE)) +
-    geom_col()
-```
-
-##### `PercentYield`
-
-```{r lender profit by income verifiable, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = IncomeVerifiable, y=PercentYield)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-#### `TotalTrades`
-
-##### `LoanStatus`
-
-```{r loan status by total trades, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = TotalTrades)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by total trades, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = TotalTrades, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `TradesNeverDelinquent`
-
-##### `LoanStatus`
-
-```{r loan status by trade delinquency, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = TradesNeverDelinquent.per)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by trade delinquency, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = TradesNeverDelinquent.per, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-### Other Prosper Data vs. Actual Profit
-
-#### `TotalProsperLoans`
-
-##### `LoanStatus`
-
-```{r loan status by prosper loans, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = TotalProsperLoans)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by prosper loans, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = factor(TotalProsperLoans), y=PercentYield)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-#### `OnTimeProsperPayments`
-
-##### `LoanStatus`
-
-```{r loan status by on time payments, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = OnTimeProsperPayments)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by on time payments, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = OnTimeProsperPayments, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `ProsperPrincipalOutstanding`
-
-##### `LoanStatus`
-
-```{r loan status by principal outstanding, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = ProsperPrincipalOutstanding)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by principal outstanding, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = ProsperPrincipalOutstanding, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `Recommendations`
-
-##### `LoanStatus`
-
-```{r loan status by recommendations, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = Recommendations)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by recommendations, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = Recommendations, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `InvestmentFromFriendsCount`
-
-##### `LoanStatus`
-
-```{r loan status by friend investment, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = InvestmentFromFriendsCount)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by friend investment, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = InvestmentFromFriendsCount, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `InvestmentFromFriendsAmount`
-
-##### `LoanStatus`
-
-```{r loan status by friend amount, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted")))
-
-ggplot(plot_data, aes(x = LoanStatus, y = InvestmentFromFriendsAmount)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal)
-```
-
-##### `PercentYield`
-
-```{r lender profit by friend amount, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data
-
-ggplot(plot_data, aes(x = InvestmentFromFriendsAmount, y=PercentYield)) +
-  geom_hex(bins = 50) +
-  geom_smooth(formula = y~x)
-```
-
-#### `LoanOriginationQuarter`
 
 <div class="fold o">
-```{r}
-summary(filter(relevant_data, is.na(LoanOriginationQuarter)))
-relevant_data$LoanOriginationQuarter <- fct_explicit_na(relevant_data$LoanOriginationQuarter, "Q4 2005")
+```{r lender profit by employment status duration cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$EmploymentStatusDuration, lender_data$PercentYield, method = "pearson")
 ```
 </div>
 
-##### `LoanStatus`
+In fact, employment status duration does not seem to predict loan payment or lender profit ($r=0.004$, $p=0.37$).
 
-```{r loan status by quarter, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(LoanStatus = ordered(LoanStatus, c("Completed","Chargedoff","Defaulted"))) %>%
-  group_by(LoanOriginationQuarter, LoanStatus) %>%
-  summarize(n=n()) %>%
-  spread(LoanStatus,n) %>%
-  replace_na(list(Completed=0, Chargedoff=0, Defaulted=0)) %>%
-  summarize(percent = Completed/(Completed+Chargedoff+Defaulted))
+#### `IsBorrowerHomeowner`
+
+One might expect for homeowners, which on average may be more financially stable, to be more likely to repay loans.
+
+##### `Completed`
+
+```{r loan status by home ownership, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data %>% 
+  group_by(Completed) %>%
+  filter(!is.na(IsBorrowerHomeowner)), "Completed", "as.numeric(IsBorrowerHomeowner)")
+```
+
+```{r loan status by home ownership table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "IsBorrowerHomeowner")
+```
+
+##### `PercentYield`
+
+```{r lender profit by home ownership, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "IsBorrowerHomeowner", "PercentYield")
+```
+
+```{r lender profit by home ownership table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "IsBorrowerHomeowner", "PercentYield")
+```
+
+Those who paid off their loans are marginally more likely to be homeowners.  Those who are homeowners are not likely to be much more profitable (the confidence intervals overlap).
+
+#### `CreditScore`
+
+In this case, I will average out upper-range and lower-range credit scores (particularly as the two are nearly perfectly correlated).  One would expect for those with higher credit scores to be more likely to replay loans, and to be profitable for lenders.
+
+##### `Completed`
+
+```{r loan status by credit score, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+lender_data <- mutate(lender_data, CreditScore = (CreditScoreRangeLower+CreditScoreRangeUpper)/2)
+
+cat_by_cont(lender_data, "Completed", "CreditScore")
+```
+
+```{r loan status by credit score table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "CreditScore")
+```
+
+##### `PercentYield`
+
+```{r lender profit by credit score, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+p1 <- ggplot(lender_data, aes(x = CreditScore, y=PercentYield)) +
+  geom_hex(bins = 25) +
+  geom_smooth(formula = y~x) +
+  geom_smooth(formula = y~x, method=lm, color="orange")
+
+plot_data <- lender_data %>% filter(CreditScore > 400)
+
+p2 <- ggplot(plot_data, aes(x = CreditScore, y=PercentYield)) +
+  geom_hex(bins = 25) +
+  geom_smooth(formula = y~x) +
+  geom_smooth(formula = y~x, method=lm, color="orange")
+
+p1
+p2
+```
+
+<div class="fold o">
+```{r lender profit by credit score cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$CreditScore, lender_data$PercentYield, method = "pearson")
+cor.test(plot_data$CreditScore, plot_data$PercentYield, method = "pearson")
+```
+</div>
+
+Those who pay off loans tend to have slightly higher credit scores.  Yield is fairly low at lower credit scores, increasing more reliably above 0 at higher ranges ($r=0.096$, $p<0.001$).  Mostly, it is visually clear that low credit scores correspond to lower lender profit.
+
+#### `FirstRecordedCreditLine`
+
+It's not clear here what the prediction to be - those with a longer credit history may be more likely to repay loans, but they may also simply be older.
+
+```{r credit history age}
+# creates new credit history age variable by subtracting data of first credit line creation from the listing creation data, and dividing by 365 to get the age of credit history in years
+lender_data$CreditHistoryAge <- as.numeric((lender_data$ListingCreationDate - lender_data$FirstRecordedCreditLine)/365)
+```
+
+
+##### `Completed`
+
+```{r loan status by first credit line, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "CreditHistoryAge")
+```
+
+```{r loan status by first credit line table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "CreditHistoryAge")
+```
+
+##### `PercentYield`
+
+```{r lender profit by first credit line, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "CreditHistoryAge", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by first credit line cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(as.numeric(lender_data$CreditHistoryAge), lender_data$PercentYield, method="pearson")
+```
+</div>
+
+It appears that there is not much difference in terms of credit history age (roughly estimated, not accounting for loan date) between completed and non-completed loans.  Likewise, there appears to be little effect on lender profit, although it looks like there might be a very slight trend for those with very young credit history to be less profitable ($r=0.01$, $p<0.001$).
+
+#### `OpenRevolvingAccounts`
+
+It's usually considered to be good to have some, but not too many open revolving accounts, so it may be the case that those with either too few, or too many revolving accounts may be less profitable.
+
+##### `Completed`
+
+```{r loan status by open revolving accounts, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "OpenRevolvingAccounts")
+```
+
+```{r loan status by open revolving accounts table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "OpenRevolvingAccounts")
+```
+
+##### `PercentYield`
+
+```{r lender profit by open revolving accounts, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "OpenRevolvingAccounts", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by open revolving accounts cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$OpenRevolvingAccounts, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Those who paid off loans have slightly more open revolving accounts, on average.  It also seems that those with no to very few revolving accounts may be less profitable, and at higher ranges it is difficult to tell what the trend is (but it does not appear to be a very strong one).  Overall, there is a slight trend for those with more open revolving accounts to be more profitable, on average ($r=0.04$, $p<0.001$).
+
+#### `InquiriesLast6Months`
+
+Those with more recent credit inquiries may be more desperate for credit, and therefore less financially stable, and less likely to replay loans.
+
+##### `Completed`
+
+```{r loan status by inquiries, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "InquiriesLast6Months")
+```
+
+```{r loan status by inquiries table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "InquiriesLast6Months")
+```
+
+##### `PercentYield`
+
+```{r lender profit by inquiries, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "InquiriesLast6Months", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by inquiries cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$InquiriesLast6Months, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+This appears to be a relatively robust predictor - those who did not pay off loans have more recent inquiries.  Similarly, the more recent credit inquiries, the lower the profits (this trend remains if sparse data at the higher ranges is filtered out) ($r=-0.15$, $p<0.001$).
+
+#### `AmountDelinquent`
+
+Those who have a higher amount delinquent at the time the credit information was pulled should be less likely to repay loans, and be less profitable, on average.
+
+##### `Completed`
+
+```{r loan status by amount delinquent, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "AmountDelinquent")
+```
+
+```{r loan status by amount delinquent table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "AmountDelinquent")
+```
+
+##### `PercentYield`
+
+As higher-range data is sparse, I filtered out amounts over $30,000.
+
+```{r lender profit by amount delinquent, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(filter(lender_data, AmountDelinquent < 30000), "AmountDelinquent", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by amount delinquent cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$AmountDelinquent, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+It is in fact the case that those who did not pay off loans had a higher amount delinquent at the time the credit information was pulled.  Similarly, it seems that lender profit decreases when borrowers have even a relatively small amount of money delinquent, but then stays relatively stable, or deceases gradually.  The overall trend is for profit to decrease as amount delinquent increases ($r=-0.025$, $p<0.001$).
+
+#### `DelinquenciesLast7Years`
+
+Those who have more delinquencies should be less likely to pay off loans.
+
+##### `Completed`
+
+```{r loan status by delinquencies, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "DelinquenciesLast7Years")
+```
+
+```{r loan status by delinquencies table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "DelinquenciesLast7Years")
+```
+
+##### `PercentYield`
+
+```{r lender profit by delinquencies, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "DelinquenciesLast7Years", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by delinquencies cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$DelinquenciesLast7Years, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Those who did not pay off loans in fact have more delinquencies, and there is a slight trend for them to be less profitable ($r=-0.02$, $p<0.001$).
+
+#### `RevolvingCreditBalance`
+
+Those who have a higher revolving credit balance may be less likely to repay their loans, although a higher balance does not necessarily reflect financial difficulties (and sometimes in fact reflects greater financial means).
+
+##### `Completed`
+
+```{r loan status by revolving balance, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "RevolvingCreditBalance")
+```
+
+```{r loan status by revolving balance table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "RevolvingCreditBalance")
+```
+
+##### `PercentYield`
+
+In this case I again filtered out data above $500,000, due to sparsity.
+
+```{r lender profit by revolving balance, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(filter(lender_data, RevolvingCreditBalance < 500000), "RevolvingCreditBalance", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by revolving balance cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$RevolvingCreditBalance, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+It looks like there's little to no difference in revolving credit balance between those who do, and don't pay off loans.  It also looks like revolving credit balance is not a good predictor of lender yield ($r=-0.006$, $p=0.17$).
+
+#### `BankcardUtilization`
+
+Typically, a very high percentage of bankcard utilization would likely correspond to lower financial means, but a very low percentage may also reflect a lack of history of paying off loans.
+
+##### `Completed`
+
+```{r loan status by bankcard utilization, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "BankcardUtilization")
+```
+
+```{r loan status by bankcard utilization table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "BankcardUtilization")
+```
+
+##### `PercentYield`
+
+```{r lender profit by bankcard utilization, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "BankcardUtilization", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by bankcard utilization cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$BankcardUtilization, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+There is relatively little difference between those who have and haven't paid off loans in terms of bankcard utilization, although those who have not completed loans have relatively high bankcard utilization.  In terms of yield, there is a slight trend for those with low bankcard utilization to be less profitable than those with bankcard utilization ($r=0.04$, $p<0.001$), particularly starting around 1%.  Those with higher bankcard utilization, however, appear to be less profitable (at very high levels, data is sparse).
+
+#### `DebtToIncomeRatio`
+
+Those with a higher debt to income ratio should be less likely to pay off their loans.
+
+##### `Completed`
+
+```{r loan status by debt ratio, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "DebtToIncomeRatio")
+```
+
+```{r loan status by debt ratio table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "DebtToIncomeRatio")
+```
+
+##### `PercentYield`
+
+```{r lender profit by debt ratio, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "DebtToIncomeRatio", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by debt ratio cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$DebtToIncomeRatio, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Those who have not paid off their loans have a higher debt to income ratio, and there appears to be a clear trend for those with a higher ratio to be less profitable ($r=-0.04$, $p<0.001$).
+
+#### `IncomeVerifiable`
+
+Those with verifiable income may be more likely to pay off loans.
+
+##### `Completed`
+
+```{r loan status by income varifiable, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "as.numeric(IncomeVerifiable)")
+```
+
+```{r loan status by income varifiable table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "IncomeVerifiable")
+```
+
+##### `PercentYield`
+
+```{r lender profit by income verifiable, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "IncomeVerifiable", "PercentYield")
+```
+
+```{r lender profit by income verifiable table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "IncomeVerifiable", "PercentYield")
+```
+
+There is very little difference between those who have and haven't paid off loans, in terms of whether their income is verifiable.  However, those whose income is not verifiable tend to be less profitable.
+
+#### `TotalTrades`
+
+The prediction here is not clear to me - whether more trade lines opened in the past have any effect, one way or the other, on likelihood of loan repayment.  It may be possible that those with more trade lines have more financial means, at the least.
+
+##### `Completed`
+
+```{r loan status by total trades, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "TotalTrades")
+```
+
+```{r loan status by total trades table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "TotalTrades")
+```
+
+##### `PercentYield`
+
+```{r lender profit by total trades, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "TotalTrades", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by total trades cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$TotalTrades, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+In fact, there is no clear trend here (those who did not pay off loans have marginally fewer trades), although those with more past trade lines may be very marginally more profitable ($r=0.02$, $p<0.001$).
+
+#### `TradesNeverDelinquent`
+
+As typical, those with more delinquencies should be less likely to pay off loans.
+
+##### `Completed`
+
+```{r loan status by trade delinquency, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "TradesNeverDelinquent.per")
+```
+
+```{r loan status by trade delinquency table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "TradesNeverDelinquent.per")
+```
+
+##### `PercentYield`
+
+```{r lender profit by trade delinquency, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "TradesNeverDelinquent.per", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by trade delinquency cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$TradesNeverDelinquent.per, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Those who did not pay off loans have slightly fewer trade lines that were not delinquent.  There is not a clear enough trend with respect to lender yield to draw conclusions, at least on the basis of a linear correlation ($r=0.009$, $p=0.05$).
+
+### Other Prosper Data vs. Actual Profit
+
+First, I quickly want to see how well the numerical Prosper variables correlate, as well as whether they correlate with Prosper scores.
+
+```{r prosper cor, fig.width = 12, fig.height = 12, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+# selects variables related to prior Prosper activity
+prosper <- c("ProsperRating.num","ProsperScore","TotalProsperLoans","OnTimeProsperPayments","ProsperPrincipalOutstanding","Recommendations","InvestmentFromFriendsCount","InvestmentFromFriendsAmount")
+
+# plots correlations among variables
+ggpairs(lender_data[prosper], 
+        lower = list(continuous = wrap("smooth", color = "blue")))
+```
+
+There is a moderately strong correlation between having a higher number of Prosper loans and having more on-time Prosper payments, unsurprisingly.  There are also moderate to strong correlations among the variables related to friend recommendations and contributions, as would be expected.
+
+#### `TotalProsperLoans`
+
+Those with more Prosper loans may be more reliable customers, but this is assuming that they have at least partially paid off those loans prior to opening the relevant loan.  If there are many loans opened around the same time, this may suggest more financial difficulties.
+
+##### `Completed`
+
+`NA` values are replaced with 0's.
+
+```{r loan status by prosper loans, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(replace_na(lender_data, list(TotalProsperLoans = 0)), "Completed", "TotalProsperLoans")
+```
+
+```{r loan status by prosper loans table, cache=TRUE, fig.height=1.5}
+table_stats(replace_na(lender_data, list(TotalProsperLoans = 0)), "Completed", "TotalProsperLoans")
+```
+
+##### `PercentYield`
+
+```{r lender profit by prosper loans, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(replace_na(lender_data, list(TotalProsperLoans = 0)), "factor(TotalProsperLoans)", "PercentYield")
+```
+
+```{r lender profit by prosper loans table, cache=TRUE, fig.height=3.25}
+table_stats(replace_na(lender_data, list(TotalProsperLoans = 0)), "TotalProsperLoans", "PercentYield")
+```
+
+Those who paid off their loans have more Prosper loans, on average.  Those who have never had any Prosper loans are significantly less profitable - for those who have taken out loans, there is not quite enough data to draw conclusions regarding whether taking out more, or fewer loans, corresponds to borrowers being more profitable.
+
+#### `OnTimeProsperPayments`
+
+More on-time Prosper payments, for those who have had prior loans, should correspond to a higher likelihood of repaying loans.
+
+##### `Completed`
+
+```{r loan status by on time payments, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "OnTimeProsperPayments")
+```
+
+```{r loan status by on time payments table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "OnTimeProsperPayments")
+```
+
+##### `PercentYield`
+
+```{r lender profit by on time payments, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "OnTimeProsperPayments", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by on time payments cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$OnTimeProsperPayments, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Of those who have taken out Prosper loans previously, those who repaid their loans did have slightly more on-time Prosper payments, on average.  Those who have more on-time payments also appear to be significantly more profitable ($r=0.11$, $p<0.001$).
+
+#### `ProsperPrincipalOutstanding`
+
+The more Prosper principal outstanding at the time the listing was created, the lower the likelihood should be of repaying a loan.
+
+##### `Completed`
+
+```{r loan status by principal outstanding, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "ProsperPrincipalOutstanding")
+```
+
+```{r loan status by principal outstanding table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "ProsperPrincipalOutstanding")
+```
+
+##### `PercentYield`
+
+```{r lender profit by principal outstanding, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "ProsperPrincipalOutstanding", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by principal outstanding cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$ProsperPrincipalOutstanding, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Those who did not pay off their loans have somewhat more outstanding principal at the time of loan creation, and the more principal outstanding, the less profitable they appear to be to lenders ($r=-0.16$, $p<0.001$).
+
+#### `Recommendations`
+
+The more recommendations, the more reliable the borrower should be.
+
+##### `Completed`
+
+```{r loan status by recommendations, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "Recommendations")
+```
+
+```{r loan status by recommendations table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "Recommendations")
+```
+
+##### `PercentYield`
+
+```{r lender profit by recommendations, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "Recommendations", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by recommendationsg cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$Recommendations, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+There is no clear difference in number of recommendations between those who have and haven't paid off loans, but more recommendations may correspond to marginally higher yield, although this seems to be a fairly weak trend, due in part to relatively few borrowers having any recommendations ($r=0.01$, $p<0.01$).
+
+#### `InvestmentFromFriendsCount`
+
+Those with more investment from friends may be regarded by friends as relatively trustworthy, and should be more likely to repay loans.
+
+##### `Completed`
+
+```{r loan status by friend investment, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "InvestmentFromFriendsCount")
+```
+
+```{r loan status by friend investment table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "InvestmentFromFriendsCount")
+```
+
+##### `PercentYield`
+
+```{r lender profit by friend investment, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "InvestmentFromFriendsCount", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by friend investment cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$InvestmentFromFriendsCount, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+Those who paid off their loans had more friends invest.  For lender yield, the trend is somewhat weak, also due to paucity of data, but those with at least some investment from friends appear to be a bit more profitable ($r=0.02$, $p<0.001$).
+
+#### `InvestmentFromFriendsAmount`
+
+##### `Completed`
+
+```{r loan status by friend amount, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+cat_by_cont(lender_data, "Completed", "InvestmentFromFriendsAmount")
+```
+
+```{r loan status by friend amount table, cache=TRUE, fig.height=1.5}
+table_stats(lender_data, "Completed", "InvestmentFromFriendsAmount")
+```
+
+##### `PercentYield`
+
+```{r lender profit by friend amount, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+simple_hex(lender_data, "InvestmentFromFriendsAmount", "PercentYield")
+```
+
+<div class="fold o">
+```{r lender profit by friend amount cor, cache=TRUE, warning=FALSE, message=FALSE}
+cor.test(lender_data$InvestmentFromFriendsAmount, lender_data$PercentYield, method = "pearson")
+```
+</div>
+
+There is no clear difference between those who have and haven't paid off loans, in terms of investment from friends.  For yield, there is no clear trend ($r=0.006$, $p=0.13$).
+
+#### `LoanOriginationQuarter`
+
+I have no predictions here, as I am not familiar with the history of the company.
+
+##### `Completed`
+
+```{r loan status by quarter, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data %>% 
+  group_by(LoanOriginationQuarter) %>%
+  summarize(percent = mean(Completed=="Completed"))
 
 ggplot(plot_data, aes(x = LoanOriginationQuarter, y = percent)) +
   geom_col() +
@@ -1086,10 +1377,14 @@ ggplot(plot_data, aes(x = LoanOriginationQuarter, y = percent)) +
   coord_flip()
 ```
 
+```{r loan status by quarter table, cache=TRUE, fig.height=10}
+table_stats(lender_data, "LoanOriginationQuarter", "Completed.num")
+```
+
 ##### `PercentYield`
 
-```{r lender profit by quarter, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
+```{r lender profit by quarter, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- lender_data %>% 
   group_by(LoanOriginationQuarter) %>% 
   summarize(PercentYield = mean(PercentYield, na.rm = TRUE))
 
@@ -1099,458 +1394,715 @@ ggplot(plot_data, aes(x = LoanOriginationQuarter, y=PercentYield)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-Ultimately, without knowing how the loans ultimately panned out, it is a bit difficult to use this data to make future predictions.
-
-## Borrower Profit
-
-Here, I will look at `BorrowerAPR` (lower is better), `BorrowerRate` (lower is better), `LoanOriginalAmount` (very roughly assuming that getting larger loans is somewhat preferable, though this is likely confounded by the borrower's needs and financial situation), `MonthlyLoanPayment` (lower is better), `Term` (roughly assuming that longer is better), and `PercentFunded` (more is better).
-
-```{r borrower relevant data, cache=TRUE}
-relevant_data <- data %>%
-  mutate(PercentYield = ((LoanOriginalAmount-LP_NetPrincipalLoss+LP_ServiceFees+LP_CollectionFees+LP_NonPrincipalRecoverypayments+LP_InterestandFees)/LoanOriginalAmount)-1)
+```{r lender profit by quarter table, cache=TRUE, fig.height=10}
+table_stats(lender_data, "LoanOriginationQuarter", "PercentYield")
 ```
 
+Interestingly, the percentage of loans paid off has fluctuated noticeably by quarter, and average lender yield had fluctuated very noticeably - there have been extended periods where average lender yield was well above 0, and other extended periods where it was well below 0.
 
-### Scores vs. Actual Profit
+## Borrower Terms
+
+Here, I will look at `BorrowerAPR` (lower is better), `BorrowerRate` (lower is better), `LoanOriginalAmount` (very roughly assuming that getting larger loans is somewhat preferable, though this is likely confounded by the borrower's needs and financial situation), `MonthlyLoanPayment` (lower is generally better, although this may also be confounded by the borrower's financial means, as well as the amount of the loan), `Term` (roughly assuming that longer is better, but this may also be confounded), and `PercentFunded` (more is better).
+
+First, I want to see how well these variables correlate, as well as whether they correlate with Prosper ratings and estimates.
+
+```{r borrower relevant data, cache=TRUE}
+# re-defines relevant data to include open loans, but keeps PercentYield calculation, just in case, as well as credit score and credit history age calculations
+borrower_data <- data %>%
+  mutate(PercentYield = (
+    (LoanOriginalAmount-LP_NetPrincipalLoss+LP_ServiceFees+LP_CollectionFees+LP_NonPrincipalRecoverypayments+LP_InterestandFees)
+    /LoanOriginalAmount)
+    -1) %>%
+  mutate(CreditScore = (CreditScoreRangeLower + CreditScoreRangeUpper)/2) %>%
+  mutate(CreditHistoryAge = as.numeric((ListingCreationDate - FirstRecordedCreditLine)/365))
+```
+
+```{r borrower cor, fig.width = 16.5, fig.height = 16.5, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+# selects variables most relevant to borrower profit/terms
+borrower_profit <- c("ProsperRating.num","ProsperScore","EstimatedEffectiveYield","EstimatedLoss","EstimatedReturn","BorrowerAPR","BorrowerRate","LoanOriginalAmount","MonthlyLoanPayment","Term","PercentFunded")
+
+# plots correlations among those variables
+ggpairs(borrower_data[borrower_profit], 
+        lower = list(continuous = wrap("smooth", color = "blue")))
+```
+
+In this case, there seem to be strong correlations among borrower terms, and between borrower terms and Prosper scores.  What appears likely is that Prosper uses more-or-less the same data to determine scores and borrower terms, and the borrower terms they decide on for any given loan are unsurprisingly highly correlated.
+
+### Scores vs. Borrower Terms
+
+I expect that borrowers with higher Prosper ratings will have better terms, as defined above.
 
 #### `Rating`
 
-```{r borrower profit by rating, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  mutate(Rating = coalesce(CreditGrade, ProsperRating.alpha)) %>%
+```{r borrower terms by rating, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>% 
+  filter(!is.na(Rating)) %>%
   select(Rating,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
   gather(Measure, value, -Rating)
 
-ggplot(plot_data, aes(x = Rating, y=value)) +
-  geom_col() + 
+# function to create a faceted bar plot
+complex_bar <- function(data, col) {
+  ggplot(plot_data, aes_string(x = col, y="value")) +
+  geom_bar(stat="summary", fun.y="mean") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
   facet_grid(Measure ~ ., scales="free")
+}
+
+complex_bar(plot_data, "Rating")
+```
+
+```{r borrower terms by ratin table, cache=TRUE, fig.height=14, fig.width=9}
+table_stats_mult(plot_data, "Measure", "Rating", "value")
 ```
 
 #### `ProsperScore`
 
-```{r borrower profit by sore, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
+```{r borrower terms by sore, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>%
+  filter(!is.na(ProsperScore)) %>%
   select(ProsperScore,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
   gather(Measure, value, -ProsperScore)
 
-ggplot(plot_data, aes(x = factor(ProsperScore), y=value)) +
-  geom_col() + 
-  facet_grid(Measure ~ ., scales="free")
+complex_bar(plot_data, "ProsperScore")
 ```
 
-### Estimated Profit vs. Actual Profit
+```{r borrower terms by sore table, cache=TRUE, fig.height=19.5, fig.width=10}
+table_stats_mult(plot_data, "Measure", "ProsperScore", "value")
+```
+
+This appears to broadly be the case - borrowers with higher Prosper ratings, or higher Prosper scores, and have lower APRs and interest rates.  However, they have higher monthly payments, likely due to higher loans.  All groups have their loans about equally funded, and loan terms are broadly similar among all groups, even if they tend to be slightly longer for those with better risk scores.  `Term` and `PercentFunded` therefore do not seem as informative, as they barely vary, and it will therefore be difficult to draw conclusions about them.  I will therefore not include them in this preliminary exploration, although they may later turn out to be informative.  `MonthlyLoanPayment` is confounded by the amount of the original loan, and I will therefore transform it to reflect the percentage of the loan paid per month.
+
+```{r montly loan payment, cache=TRUE, warning=FALSE, message=FALSE}
+borrower_data <- borrower_data %>%
+  mutate(MonthlyLoanPercent = MonthlyLoanPayment/LoanOriginalAmount)
+```
+
+
+### Estimated Profit vs. Borrower Terms
 
 #### `EstimatedEffectiveYield`
 
-```{r borrower profit by estimated yield, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(EstimatedEffectiveYield,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -EstimatedEffectiveYield)
+```{r borrower terms by estimated yield, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+# function to create a faceted hex plot
+complex_hex <- function(data,measure) {
+  plot_data <- data %>%
+  select(measure,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPercent) %>%
+  gather(Measure, value, -measure)
 
-ggplot(plot_data, aes(x = EstimatedEffectiveYield, y=value)) +
+ggplot(plot_data, aes_string(x = measure, y="value")) +
   stat_binhex() +
   geom_smooth(formula = y~x) + 
+  geom_smooth(formula = y~x, method=lm, color="orange") + 
   facet_wrap(~Measure, scales="free")
+}
+
+complex_hex(borrower_data, "EstimatedEffectiveYield")
 ```
+
+<div class="fold o">
+```{r borrower terms by estimated yield cor, cache=TRUE, warning=FALSE, message=FALSE}
+# function to loop through relevant measures, printing out Pearson correlations with the variable of interest
+complex_cor <- function(var) {
+  for (measure in c("BorrowerAPR","BorrowerRate","LoanOriginalAmount","MonthlyLoanPercent")) {
+  print(paste(var,"vs.",measure))
+  print(cor.test(borrower_data[[measure]], borrower_data[[var]], method = "pearson"))
+  }
+}
+
+complex_cor("EstimatedEffectiveYield")
+```
+</div>
+
+Here is seems that APR and interest rates are optimal when estimated effective yield is around 5%, and high at lower numbers (when yield is expected to be low), or higher numbers (where yield primarily comes from high interest rates on high-risk loans).
+
+Loan amounts and monthly loan payments are more likely to be high when the yield is around 10%.  Lower amounts for low-yield loans, and for high-yield but high-risk loans.  Overall, looking at the `gam` model, which can fit non-linearities, optimal loans terms appear to correspond to an estimated yield rate of 5-10%.
+
+On average, however, it looks like higher estimated yield corresponds to higher APR ($r=0.90$, $p<.001$) and interest rates ($r=0.90$, $p<.001$), lower original loan amounts ($r=-0.33$, $p<.001$), and higher monthly loan payments ($r=0.30$, $p<.001$).
 
 #### `EstimatedLoss`
 
-```{r borrower profit by estimated loss, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(EstimatedLoss,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -EstimatedLoss)
-
-ggplot(plot_data, aes(x = EstimatedLoss, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by estimated loss, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "EstimatedLoss")
 ```
+
+<div class="fold o">
+```{r borrower terms by estimated loss cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("EstimatedLoss")
+```
+</div>
+
+Here, it seems that for higher estimated loss, borrower ARP and interest rates sharply go up (then around 20%, seem to level off, due to some kind of cap).  On the other hand, loan amounts and monthly payments are lower for loans with higher estimated loss.
+
+On average, higher estimated loss corresponds to higher APR ($r=0.95$, $p<.001$) and interest rates ($r=0.95$, $p<.001$), lower loan amounts ($r=-0.43$, $p<.001$), and higher monthly payments ($r=0.42$, $p<.001$).
 
 #### `EstimatedReturn`
 
-```{r borrower profit by estimated return, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(EstimatedReturn,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -EstimatedReturn)
-
-ggplot(plot_data, aes(x = EstimatedReturn, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by estimated return, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "EstimatedReturn")
 ```
 
-### Demographics vs. Actual Profit
+<div class="fold o">
+```{r borrower terms by estimated return cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("EstimatedReturn")
+```
+</div>
+
+Optimal APR and interest rates are for loans with around a 5% estimated return rate - likely for the same reasons as speculated above (regarding high-risk loans).  Loan amounts and monthly loan payments peak around 5% estimated return rates.
+
+On average, higher estimated return corresponds to higher APRs ($r=0.79$, $p<.001$) and interest rates ($r=0.82$, $p<.001$), lower loan amounts ($r=-0.29$, $p<.001$), and higher relative monthly payments ($r=0.16$, $p<.001$).
+
+### Demographics vs. Borrower Terms
 
 #### `Occupation`
 
-```{r borrower profit by occupation, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  select(Occupation,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  # mutate(Occupation = reorder(Occupation, BorrowerRate)) %>%
-  gather(Measure, value, -Occupation)
+Again, I expect higher-paying occupations will receive better terms, on average.
 
-ggplot(plot_data, aes(x = Occupation, y=value)) +
-  geom_col() +
-  facet_grid(Measure ~ ., scales="free")
+```{r borrower terms by occupation, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>% 
+  filter(!is.na(Occupation)) %>%
+  select(Occupation,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPercent) %>%
+  gather(Measure, value, -Occupation) %>%
+  mutate(Occupation = reorder(Occupation, value))
+
+complex_bar(plot_data, "Occupation")
 ```
 
-There are too many occupations to make easy generalizations.  Occupations would likely need to be grouped into a smaller number of categories.  However, one can observe general trends - those with higher-paying occupations (or occupational prospects) seem to be more profitable customers.  On the other hand, students in general are among the bank's least profitable customers.  This suggests that income, which is grouped in a more sensible manner, may be useful to look at.
+Overall, here it looks like higher-paying professions have higher approved loan amount and higher monthly payments, and moderately lower APR and interest rates, on average.  Students, on average, have much smaller loans and lower monthly payments, and slightly higher APR and interest rates, on average.
 
 #### `IncomeRange`
 
-```{r borrower profit by income range, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(IncomeRange,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
+I am omitting the `Not displayed` category, as it's unclear what to make of it.
+
+```{r borrower terms by income range, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>%
+  filter(IncomeRange != "Not displayed") %>%
+  select(IncomeRange,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPercent) %>%
   gather(Measure, value, -IncomeRange)
 
-ggplot(plot_data, aes(x = IncomeRange, y=value)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
-  coord_flip() + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
-  facet_grid(Measure ~ ., scales="free")
+complex_bar(plot_data, "IncomeRange")
 ```
 
-Here, it can be seen that as income rises, the `ProsperRating` increases, and other measures of profit decrease.  **As we have seen, `ProsperRating` correlates with credit score and likelihood of not defaulting**. This suggests that high-income lenders are lower-risk, but lower-income lenders, while being higher-risk, can also yield more profit.
+```{r borrower terms by income range table, cache=TRUE, fig.height=9, fig.width=10}
+table_stats_mult(plot_data, "Measure", "IncomeRange", "value")
+```
+
+Overall, those with higher income do receive more favorable terms (higher loan amounts, lower rates), together with slightly lower relative monthly loan payments.  However, those with $0 income also receive relatively favorable terms, for reasons I can't currently determine.
+
+<div class="fold o">
+```{r}
+summary(filter(borrower_data, IncomeRange=="$0"))
+```
+</div>
+
+It looks like most of those who report $0 income are in fact employed, which leads me to suspect that this measure is not correctly reported.  I will therefore exclude this value from analysis.
+
+```{r borrower terms by income range 2, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>%
+  filter(IncomeRange != "Not displayed" & IncomeRange != "$0") %>%
+  select(IncomeRange,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPercent) %>%
+  gather(Measure, value, -IncomeRange)
+
+complex_bar(plot_data, "IncomeRange")
+```
+
+```{r borrower terms by income range 2 table, cache=TRUE, fig.height=8, fig.width=10}
+table_stats_mult(plot_data, "Measure", "IncomeRange", "value")
+```
 
 #### `EmploymentStatus`
 
-```{r borrower profit by employment status, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(EmploymentStatus,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -EmploymentStatus)
+I generally expect that those who have a more secure employment status will receive more favorable terms.  I will filter out observations where employment status was not available.
 
-ggplot(plot_data, aes(x = EmploymentStatus, y=value)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
-  coord_flip() + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
-  facet_grid(Measure ~ ., scales="free")
+```{r borrower terms by employment status, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>%
+  filter(!is.na(EmploymentStatus) & EmploymentStatus != "Not available") %>%
+  select(EmploymentStatus,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPercent) %>%
+  gather(Measure, value, -EmploymentStatus) %>%
+  mutate(EmploymentStatus = factor(EmploymentStatus, levels =  c("Other","Not available","Self-employed","Not employed","Retired","Employed","Part-time","Full-time")))
+
+complex_bar(plot_data, "EmploymentStatus")
 ```
 
-What it looks like here is that Prosper ratings are highest for those employed, and employed full-time (it's not clear what the difference is), lower for those who are self-employed, retired, work part-time, or 'other,' and much lower for those not employed.  `LenderYield`, `EstimatedEffectiveYield`, and `EstimatedReturn`, however, are highest for those not employed, likely reflecting the higher anticipated interest charged to people in that group.  `Estimated Loss`, correspondingly, is also highest for those not employed - there's higher potential profit if the loans are paid back, but also significantly more risk.
+```{r borrower terms by employment status table, cache=TRUE, fig.height=8.5, fig.width=10}
+table_stats_mult(plot_data, "Measure", "EmploymentStatus", "value")
+```
+
+The trend here is not quite as clear - overall, it looks like those employed receive somewhat better interest rates.  Those who are 'employed' or 'self-employed' receive the highest loan amounts.  Those who are not employed have marginally higher monthly loan payments.
 
 #### `EmploymentStatusDuration`
 
-```{r borrower profit by employment duration, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(EmploymentStatusDuration,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -EmploymentStatusDuration)
+I expect that higher employment status duration may result in more favorable terms.
 
-ggplot(plot_data, aes(x = EmploymentStatusDuration, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by employment duration, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "EmploymentStatusDuration")
 ```
+
+<div class="fold o">
+```{r borrower terms by employment duration cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("EmploymentStatusDuration")
+```
+</div>
+
+There appears to be a very slight but consistent trend for those with greater employment status duration to have higher loan amounts ($r=0.10$, $p<.001$).  The other trends are significant, but slight, and it is difficult to know what to make of them: APR ($r=-0.009$, $p<.01$), interest ($r=-0.02$, $p<.001$), monthly payments ($r=-0.05$, $p<.001$).
 
 #### `IsBorrowerHomeowner`
 
-```{r borrower profit by home ownership, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(IsBorrowerHomeowner,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
+I would expect homeowners to have slightly more favorable terms.
+
+```{r borrower terms by home ownership, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>%
+  select(IsBorrowerHomeowner,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPercent) %>%
   gather(Measure, value, -IsBorrowerHomeowner)
 
-ggplot(plot_data, aes(x = IsBorrowerHomeowner, y=value)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
+p <- ggplot(plot_data, aes(x = IsBorrowerHomeowner, y=value)) +
   facet_grid(Measure ~ ., scales="free")
+
+grid.arrange(p+geom_boxplot(),p+geom_bar(stat="summary", fun.y="mean"),ncol=2)
 ```
 
-#### `CreditScoreRangeLower`
-
-```{r borrower profit by lower credit score, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(CreditScoreRangeLower,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -CreditScoreRangeLower)
-
-ggplot(plot_data, aes(x = CreditScoreRangeLower, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by home ownership table, cache=TRUE, fig.height=3.5, fig.width=10}
+table_stats_mult(plot_data, "Measure", "IsBorrowerHomeowner", "value")
 ```
 
-#### `CreditScoreRangeUpper`
+Overall, it seems that homeowners have very slightly lower APR and interest rates, higher loan amounts, and slightly lower proportional loan payments.
 
-```{r borrower profit by upper credit score, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(CreditScoreRangeUpper,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -CreditScoreRangeUpper)
+#### `CreditScore`
 
-ggplot(plot_data, aes(x = CreditScoreRangeUpper, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+Overall, people with higher average credit scores should have markedly better terms.
+
+```{r borrower terms by credit score, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "CreditScore")
 ```
+
+<div class="fold o">
+```{r borrower terms by credit score cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("CreditScore")
+```
+</div>
+
+In fact, this is the case.  Those with high credit scores have very markedly lower APR ($r=-0.43$, $p<.001$) and interest rates ($r=-0.46$, $p<.001$).  On the other hand, they also have higher loan amounts ($r=0.34$, $p<.001$) and slightly lower proportional loan payments ($r=-0.19$, $p<.001$).
 
 #### `FirstRecordedCreditLine`
 
-```{r borrower profit by first credit line, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(FirstRecordedCreditLine,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -FirstRecordedCreditLine)
+I expect there to be little if any trend here - but those with longer credit lines may receive more favorable terms, all things being equal.
 
-ggplot(plot_data, aes(x = FirstRecordedCreditLine, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by first credit line, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "CreditHistoryAge")
 ```
+
+<div class="fold o">
+```{r borrower terms by first credit line cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("CreditHistoryAge")
+```
+</div>
+
+The trends here are difficult to interpret, although it looks like those with both very old, and more recent initial credit lines receive slightly less favorable terms (there is no clear trend, slight or otherwise, for monthly payments).  Age of credit line is likely confounded with all sorts of other factors, however - from age, to employment status, to income.
+
+On average, not taking into account any non-linear trends, those with longer credit history have slightly lower APRs ($r=-0.03$, $p<.001$) and interest rates ($r=-0.05$, $p<.001$), higher loan amounts ($r=0.17$, $p<.001$), and slightly lower proportional monthly payments ($r=-0.06$, $p<.001$).
 
 #### `OpenRevolvingAccounts`
 
-```{r borrower profit by open revolving accounts, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(OpenRevolvingAccounts,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -OpenRevolvingAccounts)
+I would expect for those with more open revolving accounts to have better borrower terms, as long as there are not too many revolving accounts open.
 
-ggplot(plot_data, aes(x = OpenRevolvingAccounts, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by open revolving accounts, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "OpenRevolvingAccounts")
 ```
+
+<div class="fold o">
+```{r borrower terms by open revolving accounts cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("OpenRevolvingAccounts")
+```
+</div>
+
+In fact, it looks like more open revolving accounts result in lower APR ($r=-0.11$, $p<.001$) and interest rates ($r=-0.13$, $p<.001$), higher loan amounts ($r=0.23$, $p<.001$), and lower proportional monthly payments ($r=-0.08$, $p<.001$), in general.  At higher values of revolving accounts the data is more sparse, and the trend not as clear, however.
 
 #### `InquiriesLast6Months`
 
-```{r borrower profit by inquiries, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(InquiriesLast6Months,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -InquiriesLast6Months)
+I would expect for more inquiries to result in worse borrower terms.
 
-ggplot(plot_data, aes(x = InquiriesLast6Months, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by inquiries, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "InquiriesLast6Months")
 ```
+
+<div class="fold o">
+```{r borrower terms by inquiries cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("InquiriesLast6Months")
+```
+</div>
+
+The trends here are a bit unclear with the `gam` model - for loan amounts and monthly payments somewhat uninterpretable, but it seems that those with more inquiries do get higher APR and interest rates - although possibly simply because this is reflected in their credit scores.
+
+Not taking into account possible non-linearities, however, those with more recent inquiries have higher APRs ($r=0.14$, $p<.001$) and interest rates ($r=0.18$, $p<.001$), lower loan amounts ($r=-0.10$, $p<.001$), and higher proportional monthly payments ($r=0.11$, $p<.001$).
 
 #### `AmountDelinquent`
 
-```{r borrower profit by amount delinquent, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(AmountDelinquent,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -AmountDelinquent)
+Those with a higher amount delinquent should receive worse terms.
 
-ggplot(plot_data, aes(x = AmountDelinquent, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by amount delinquent, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "AmountDelinquent")
 ```
+
+<div class="fold o">
+```{r borrower terms by amount delinquent cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("AmountDelinquent")
+```
+</div>
+
+Overall, what seems to make a difference is having any amount delinquent - those who have no amount delinquent receive better terms, and those who do receive slightly worse terms.  Those terms do not seem to change, however, as the amount delinquent increases.  At higher values, there is too little data to make clear conclusions about trends.
+
+Not taking into account non-linearities in the data, those with a higher amount delinquent have higher APRs ($r=0.07$, $p<.001$), higher interest rates ($r=0.07$, $p<.001$), lower loan amounts ($r=-0.04$, $p<.001$), and proportionately higher monthly payments ($r=0.04$, $p<.001$).
 
 #### `DelinquenciesLast7Years`
 
-```{r borrower profit by delinquencies, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(DelinquenciesLast7Years,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -DelinquenciesLast7Years)
+Those with more delinquencies should receive worse terms.
 
-ggplot(plot_data, aes(x = DelinquenciesLast7Years, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by delinquencies, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "DelinquenciesLast7Years")
 ```
+
+<div class="fold o">
+```{r borrower terms by delinquencies cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("DelinquenciesLast7Years")
+```
+</div>
+
+The trends here are relatively weak, but it does seem that there is a general tendency for those with more delinquencies to have higher APR ($r=0.16$, $p<.001$) and interest rates ($r=0.17$, $p<.001$), somewhat lower loan amounts ($r=-0.14$, $p<.001$), and proportionately higher monthly payments ($r=0.07$, $p<.001$).
 
 #### `RevolvingCreditBalance`
 
-```{r borrower profit by revolving balance, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(RevolvingCreditBalance,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -RevolvingCreditBalance)
+I do not have clear predictions here, as I'm not certain how revolving credit balance reflects on general credit worthiness. On the basis of previous plots, I would predict that those with more revolving credit balance would receive more favorable terms.
 
-ggplot(plot_data, aes(x = RevolvingCreditBalance, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by revolving balance, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "RevolvingCreditBalance")
 ```
+
+<div class="fold o">
+```{r borrower terms by revolving balance cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("RevolvingCreditBalance")
+```
+</div>
+
+Overall, it looks like those with more credit balance have lower APR ($r=-0.05$, $p<.001$) and interest rates ($r=-0.06$, $p<.001$), higher loan amounts ($r=0.19$, $p<.001$), and lower proportional monthly payments ($r=-0.04$, $p<.001$).  Those with revolving credit balance have sharply, then steadily decreasing values (in the case of APR, interest rates, and monthly payments), or increasing values (in the case of loan amounts).
 
 #### `BankcardUtilization`
 
-```{r borrower profit by bankcard utilization, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(BankcardUtilization,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -BankcardUtilization)
+Those with higher bankcard utilization might be expected to have worse terms at higher values, if higher bankcard utilization corresponds to lower financial means.  On the other hand, very low utilization may indicate low credit trustworthiness.
 
-ggplot(plot_data, aes(x = BankcardUtilization, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by bankcard utilization, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "BankcardUtilization")
 ```
+
+<div class="fold o">
+```{r borrower terms by bankcard utilization cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("BankcardUtilization")
+```
+</div>
+
+In fact, higher bankcard utilization corresponds to very initially lowered, and then sharply increased APR and interest rates.  Similarly, it corresponds to initially increased, and then decreased loan amount and monthly payments.
+
+Overall, those with more bankcard utilization have higher APR ($r=0.26$, $p<.001$), interest rates ($r=0.26$, $p<.001$), and proportional monthly payments ($r=0.06$, $p<.001$), and lower loan amounts ($r=-0.03$, $p<.001$).
 
 #### `DebtToIncomeRatio`
 
-```{r borrower profit by debt ratio, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(DebtToIncomeRatio,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -DebtToIncomeRatio)
+A higher debt to income ratio should correspond to worse terms across the board.
 
-ggplot(plot_data, aes(x = DebtToIncomeRatio, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by debt ratio, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "DebtToIncomeRatio")
 ```
+
+<div class="fold o">
+```{r borrower terms by debt ratio cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("DebtToIncomeRatio")
+```
+</div>
+
+Higher debt to income ratios correspond generally to higher APRs, interest rates, and monthly payments, and to initially higher, and then gradually lower loan amounts.  Overall, those with a higher ration have higher APRs ($r=0.06$, $p<.001$) and interest rates ($r=0.06$, $p<.001$), marginally higher loan amounts ($r=0.01$, $p<.01$), and marginally higher monthly loan payments ($r=0.03$, $p<.001$).
 
 #### `IncomeVerifiable`
 
-```{r borrower profit by income verifiable, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(IncomeVerifiable,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
+Verifiable income should lead to at least somewhat more favorable terms.
+
+```{r borrower terms by income verifiable, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>%
+  select(IncomeVerifiable,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPercent) %>%
   gather(Measure, value, -IncomeVerifiable)
 
 ggplot(plot_data, aes(x = IncomeVerifiable, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
+  geom_boxplot() + 
+  facet_wrap(~Measure, scales="free")
+
+ggplot(plot_data, aes(x = IncomeVerifiable, y=value)) +
+  geom_bar(stat="summary", fun.y="mean") +
   facet_wrap(~Measure, scales="free")
 ```
+
+```{r borrower terms by income verifiable table, cache=TRUE, fig.height=3.5, fig.width=10}
+table_stats_mult(plot_data, "Measure", "IncomeVerifiable", "value")
+```
+
+Those whose income is verifiable have lower APR and interest rates, and tend towards higher loan amounts and slightly lower proportional monthly payments.
 
 #### `TotalTrades`
 
-```{r borrower profit by total trades, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(TotalTrades,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -TotalTrades)
+Those with more trade lines opened in the past might, at the least, have more financial means, which may correspond to more favorable terms.
 
-ggplot(plot_data, aes(x = TotalTrades, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by total trades, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "TotalTrades")
 ```
+
+<div class="fold o">
+```{r borrower terms by total trades cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("TotalTrades")
+```
+</div>
+
+Overall, it looks like those with more trades have lower APR ($r=-0.04$, $p<.001$) and interest rates ($r=-0.05$, $p<.001$), higher loan amounts ($r=0.18$, $p<.001$), and slightly lower monthly loan payments ($r=-0.06$, $p<.001$), although this appears to even out quickly at higher amounts, rather than rising steadily.
 
 #### `TradesNeverDelinquent`
 
-```{r borrower profit by trade delinquency, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(TradesNeverDelinquent.per,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -TradesNeverDelinquent.per)
+Fewer delinquencies should correspond to more favorable terms.
 
-ggplot(plot_data, aes(x = TradesNeverDelinquent.per, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by trade delinquency, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "TradesNeverDelinquent.per")
 ```
 
-### Other Prosper Data vs. Actual Profit
+<div class="fold o">
+```{r borrower terms by trade delinquency cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("TradesNeverDelinquent.per")
+```
+</div>
+
+There is a very clear trend here - those whose trades were never, or rarely delinquent have lower APR ($r=-0.25$, $p<.001$) and interest rates ($r=-0.26$, $p<.001$), higher original loan amounts ($r=0.25$, $p<.001$), and lower proportional monthly payments ($r=-0.13$, $p<.001$).
+
+### Other Prosper Data vs. Borrower Terms
 
 #### `TotalProsperLoans`
 
-```{r borrower profit by prosper loans, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(TotalProsperLoans,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
+Those who have more existing Prosper loans may receive more favorable terms.
+
+```{r borrower terms by prosper loans, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>%
+  replace_na(list(TotalProsperLoans = 0)) %>%
+  select(TotalProsperLoans,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPercent) %>%
   gather(Measure, value, -TotalProsperLoans)
 
-ggplot(plot_data, aes(x = factor(TotalProsperLoans), y=value)) +
-  geom_boxplot() +
-  stat_summary(fun.data = mean_cl_normal) + 
-  facet_grid(Measure ~ ., scales="free")
+complex_bar(plot_data, "TotalProsperLoans")
 ```
+
+```{r borrower terms by prosper loans table, cache=TRUE, fig.height=11, fig.width=10, message=FALSE, warning=FALSE}
+table_stats_mult(plot_data, "Measure", "TotalProsperLoans", "value")
+```
+
+There is only a slight and unstable trend here - those with more Prosper loans may receive slightly lower APR and interest rates.
 
 #### `OnTimeProsperPayments`
 
-```{r borrower profit by prosper payments, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(OnTimeProsperPayments,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -OnTimeProsperPayments)
+Those with more on-time Prosper payments should receive more favorable terms.
 
-ggplot(plot_data, aes(x = OnTimeProsperPayments, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by prosper payments, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "OnTimeProsperPayments")
 ```
+
+<div class="fold o">
+```{r borrower terms by prosper payments cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("OnTimeProsperPayments")
+```
+</div>
+
+In fact, this is not at all the case - those with more on-time Prosper payments tend to have marginally higher APRs ($r=0.02$, $p<.01$) and loan amounts ($r=0.04$, $p<.001$), with little to no effect on interest rates ($r=0.007$, $p=0.30$) and monthly payments ($r=0.0004$, $p=0.95$).  There appears to be no clear trend here, and my suspicion is that other factors which lead people to take out more Prosper loans may confound this.
 
 #### `ProsperPrincipalOutstanding`
 
-```{r borrower profit by principal outstanding, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(ProsperPrincipalOutstanding,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -ProsperPrincipalOutstanding)
+Those with more principal outstanding should have less favorable terms.
 
-ggplot(plot_data, aes(x = ProsperPrincipalOutstanding, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by principal outstanding, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "ProsperPrincipalOutstanding")
 ```
+
+<div class="fold o">
+```{r borrower terms by principal outstanding cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("ProsperPrincipalOutstanding")
+```
+</div>
+
+Barring possible non-linearities, this confusingly does not appear to be the case - those with more principal outstanding have lower APRs ($r=-0.09$, $p<.001$), interest rates ($r=-0.09$, $p<.001$), and monthly payments ($r=-0.12$, $p<.001$), and higher loan amounts ($r=0.21$, $p<.001$).  There is likely another confounding factor here, or I am missing something conceptually.
 
 #### `Recommendations`
 
-```{r borrower profit by recommendations, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(Recommendations,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -Recommendations)
+Those with more recommendations may receive more favorable terms, assuming the terms are assigned after the recommendations are posted.
 
-ggplot(plot_data, aes(x = Recommendations, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+```{r borrower terms by recommendations, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+complex_hex(borrower_data, "Recommendations")
 ```
 
-#### `InvestmentFromFriendsCount`
-
-```{r borrower profit by friend investment, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(InvestmentFromFriendsCount,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -InvestmentFromFriendsCount)
-
-ggplot(plot_data, aes(x = InvestmentFromFriendsCount, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
+<div class="fold o">
+```{r borrower terms by recommendations cor, cache=TRUE, warning=FALSE, message=FALSE}
+complex_cor("Recommendations")
 ```
+</div>
 
-#### `InvestmentFromFriendsAmount`
-
-```{r borrower profit by friend amount, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>%
-  select(InvestmentFromFriendsAmount,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
-  gather(Measure, value, -InvestmentFromFriendsAmount)
-
-ggplot(plot_data, aes(x = InvestmentFromFriendsAmount, y=value)) +
-  stat_binhex() +
-  geom_smooth(formula = y~x) + 
-  facet_wrap(~Measure, scales="free")
-```
+The data here is quite noisy, due the paucity of recommendations on loans, but it seems that overall, APR ($r=-0.04$, $p<.001$) and interest rates ($r=-0.03$, $p<.001$) are lower for those with more recommendations, loan amounts are lower ($r=-0.02$, $p<.001$), and monthly payments are marginally higher ($r=0.008$, $p<.01$).  This is not necessarily a causal effect, however, as there are likely to be additional confounding factors, and there is too little data in any case to draw firm conclusions.
 
 #### `LoanOriginationQuarter`
 
-```{r borrower profit by loan quarter, cache=TRUE, warning=FALSE, message=FALSE}
-plot_data <- relevant_data %>% 
-  select(LoanOriginationQuarter,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPayment,Term,PercentFunded) %>%
+I have no clear predictions, again, not knowing the company history, about what average terms might look like by quarter.
+
+```{r borrower terms by loan quarter, cache=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+plot_data <- borrower_data %>% 
+  select(LoanOriginationQuarter,BorrowerAPR,BorrowerRate,LoanOriginalAmount,MonthlyLoanPercent) %>%
   gather(Measure, value, -LoanOriginationQuarter)
 
-ggplot(plot_data, aes(x = LoanOriginationQuarter, y=value)) +
-  geom_col(stat = "identity") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
-  facet_grid(Measure ~ ., scales="free")
+complex_bar(plot_data, "LoanOriginationQuarter")
 ```
 
+<div class="fold o">
+```{r borrower terms by loan quarter table, cache=TRUE, fig.height=37, fig.width=10, message=FALSE, warning=FALSE}
+table_stats_mult(plot_data, "Measure", "LoanOriginationQuarter", "value")
+```
+</div>
+
+Here it looks like APR and borrower interest rates have been fairly stable over the years, although increasing slightly and the again decreasing over time.  The average loan amount and (correspondingly) monthly loan payment has fluctuated somewhat more, possibly in connection with the economy, Prosper finances, and/or the general popularity of Prosper with potential customers of various demographics.
 
 ## Final Plots and Summary
 
-What is notable above is that in each graph where there is a noticeable relationship between profit predictors and profit measures, the Prosper rating is inversely correlated with the profit measures.  What is also notable is that there is a consistent relationship between lender yield, and lender loss: the more the lender stands to gain, the more they stand to lose.  I look at this in more detail below.  What is also notable is that estimated effective yield is **always** a bit less than both the estimated yield, reflecting also the estimated loss.
+What to me is most notable above is that there is a consistent relationship between potential lender yield, and potential or actual lender loss: the more the lender stands to gain, the riskier the loan, and the more they stand to lose.  Furthermore, it seems to be that Prosper estimates of risk or loan quality are underconservative, and that except in the case of the highest-rated loans, lenders on average tend to lose money.  I look at this in more detail below.
 
-Assuming that the various profit measures, which may reflect only profit for clients/lenders, rather than for the company itself, are in fact what we want to be looking at, it is possible to notice certain trends which may be worth looking at more closely.
+### Loan Status by Prosper Rating
 
-Further, assuming that lenders also care about potential missed payments, particularly if this would put them in a financial bind, it is worth looking at strong demographic predictors of delinquency, which does not appear to be reflected in the Prosper rating.
+```{r final plot 1, cache=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+pastDue <- levels(data$LoanStatus)[7:12]
 
-<!-- You will select three plots from your analysis to polish and share in this section. The three plots should show different trends and should be polished with appropriate labels, units, and titles (see the Project Rubric for more information). -->
+plot_data <- data %>% 
+  mutate(LoanStatus = fct_recode(LoanStatus, "PastDue" = pastDue[1], "PastDue" = pastDue[2], "PastDue" = pastDue[3], "PastDue" = pastDue[4], "PastDue" = pastDue[5], "PastDue" = pastDue[6])) %>%
+  filter(!is.na(Rating) & LoanStatus != "Cancelled") %>%
+  mutate(LoanStatus = ordered(LoanStatus, c("Defaulted","Chargedoff","PastDue","Current","FinalPaymentInProgress","Completed"))) %>%
+  group_by(Rating, LoanStatus) %>% 
+  tally %>% 
+  mutate(percent = n/sum(n))
 
-### Lender yield by estimated loss
-
-```{r final plot 1, cache=TRUE}
-
+ggplot(plot_data, aes(x = Rating, y = percent)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = percent(percent)), size=3, angle=90, hjust=-0.25) +
+  labs(title = "Loan Status by Rating", y = "Percent of Rating", x = "Loan Rating") +
+  scale_y_continuous(labels = percent, limits = c(0,1)) +
+  scale_x_discrete(labels = function(x) str_wrap(x, 10)) +
+  facet_wrap(~LoanStatus)
 ```
 
-### Lender profit by number of open revolving accounts
+Here, I show that the ratings Prosper assigns to its loans, when they are posted, are reasonably informative predictors of the intermediate or final status of the loans.  Loans with the highest Prosper ratings are rarely defaulted on or charged off, whereas those in the lower Prosper ratings *are* frequently, or even more often than not, defaulted on or charged off.  This suggests that lenders *are* well-advised to take the ratings assigned to loans by Prosper into account, when deciding which loans to invest in.
 
-```{r final plot 2, cache=TRUE}
+### Estimated and Actual Yield by Prosper Score
 
+```{r final plot 2, cache=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+plot_data <- lender_data %>% filter(!is.na(ProsperScore))
+
+# create full summary of data on estimated yield, by Prosper score
+plot_data_sum_est <- lender_data %>%
+    filter(!is.na(ProsperScore)) %>%
+    group_by(ProsperScore) %>%
+    summarise(mean = round(mean(EstimatedReturn, na.rm = TRUE),3),
+            median = round(median(EstimatedReturn, na.rm = TRUE),3),
+            sd = round(sd(EstimatedReturn, na.rm = TRUE),3),
+            n = n()) %>%
+    mutate(se = round(sd / sqrt(n),3),
+         lower.ci = round(mean - qt(1 - (0.05 / 2), n - 1) * se,3),
+         upper.ci = round(mean + qt(1 - (0.05 / 2), n - 1) * se,3))
+
+# create full summary of data on actual yield, by Prosper score
+plot_data_sum_act <- lender_data %>%
+    filter(!is.na(ProsperScore)) %>%
+    group_by(ProsperScore) %>%
+    summarise(mean = round(mean(PercentYield, na.rm = TRUE),3),
+            median = round(median(PercentYield, na.rm = TRUE),3),
+            sd = round(sd(PercentYield, na.rm = TRUE),3),
+            n = n()) %>%
+    mutate(se = round(sd / sqrt(n),3),
+         lower.ci = round(mean - qt(1 - (0.05 / 2), n - 1) * se,3),
+         upper.ci = round(mean + qt(1 - (0.05 / 2), n - 1) * se,3))
+
+box1 <- ggplot(plot_data, aes(x = factor(ProsperScore), y=EstimatedReturn)) + 
+  geom_boxplot() + 
+  scale_y_continuous(labels = percent) + 
+  labs(x = "Prosper Score", y = "Estimated Return")
+
+box2 <- ggplot(plot_data, aes(x = factor(ProsperScore), y=PercentYield)) + 
+  geom_boxplot() + 
+  scale_y_continuous(labels = percent) + 
+  labs(x = "Prosper Score", y = "Actual Return")
+
+# put 95% confidence intervals on bar plot
+bar1 <- ggplot(plot_data_sum_est, aes(x = factor(ProsperScore), y=mean)) + 
+  geom_bar(stat="identity") + 
+  geom_errorbar(aes(ymin=lower.ci, ymax=upper.ci), size=0.5, width=.25,position=position_dodge(.9)) + 
+  scale_y_continuous(labels = percent) + 
+  labs(x = "Prosper Score", y = "Estimated Return")
+  
+# put 95% confidence intervals on bar plot
+bar2 <- ggplot(plot_data_sum_act, aes(x = factor(ProsperScore), y=mean)) + 
+  geom_bar(stat="identity") + 
+  geom_errorbar(aes(ymin=lower.ci, ymax=upper.ci), size=0.5, width=.25,position=position_dodge(.9)) + 
+  scale_y_continuous(labels = percent) + 
+  labs(x = "Prosper Score", y = "Actual Return")
+
+grid.arrange(top = textGrob("Estimated and Actual Yield by Prosper Score", gp = gpar(fontsize=18)), box1, bar1, box2, bar2 ,ncol=2)
 ```
+
+This plot suggests that Prosper, likely either on the basis of faulty prediction, and/or in an effort to entice lenders to sign up with the service, appears to drastically overestimate how much lenders are likely to profit from a loan.
+
+As can be seen above in the first row, even after correcting for potential loss on charge-offs, Prosper suggests that lender return will on average be positive for all loans, including (or especially) those with low Prosper scores, who take out high-interest loans.  However, as can be seen from the actual data in the second row, the range of return in all categories is far closer to 0, frequently falling under (boxplots on the left) - and in fact lenders, on average, profit only from the highest-rated loans (whereas Prosper suggests that their return will be less than that of lower-rated loans).
+
+This data suggest that prospective lenders should treat all estimates of profit as underconservative, and that although they stand to possibly gain more through investing in higher-interest loans, on average they will in fact profit only from investing in very low-risk loans.
 
 ### Lender profit by loan origination quarter
 
-```{r final plot 3, cache=TRUE}
+```{r final plot 3, cache=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+# create full summary of data on loan completion, by loan origination quarter
+plot_data_sum_comp <- lender_data %>%
+    group_by(LoanOriginationQuarter) %>%
+    summarise(mean = round(mean(Completed.num, na.rm = TRUE),3),
+            median = round(median(Completed.num, na.rm = TRUE),3),
+            sd = round(sd(Completed.num, na.rm = TRUE),3),
+            n = n()) %>%
+    mutate(se = round(sd / sqrt(n),3),
+         lower.ci = round(mean - qt(1 - (0.05 / 2), n - 1) * se,3),
+         upper.ci = round(mean + qt(1 - (0.05 / 2), n - 1) * se,3))
 
+# create full summary of data on lender profit, by loan origination quarter
+plot_data_sum_yield <- lender_data %>%
+    group_by(LoanOriginationQuarter) %>%
+    summarise(mean = round(mean(PercentYield, na.rm = TRUE),3),
+            median = round(median(PercentYield, na.rm = TRUE),3),
+            sd = round(sd(PercentYield, na.rm = TRUE),3),
+            n = n()) %>%
+    mutate(se = round(sd / sqrt(n),3),
+         lower.ci = round(mean - qt(1 - (0.05 / 2), n - 1) * se,3),
+         upper.ci = round(mean + qt(1 - (0.05 / 2), n - 1) * se,3))
+
+
+quarter1 <- ggplot(plot_data_sum_comp, aes(x = factor(LoanOriginationQuarter), y=mean)) +
+  geom_bar(stat="identity") + 
+  geom_errorbar(aes(ymin=lower.ci, ymax=upper.ci), size=0.5, width=.25,position=position_dodge(.9)) + 
+  scale_y_continuous(labels = percent) + 
+  coord_flip() + 
+  labs(y = "Percent Completed", x = "LoanOriginationQuarter")
+
+quarter2 <- ggplot(plot_data_sum_yield, aes(x = factor(LoanOriginationQuarter), y=mean)) +
+  geom_bar(stat="identity") + 
+  geom_errorbar(aes(ymin=lower.ci, ymax=upper.ci), size=0.5, width=.25,position=position_dodge(.9)) + 
+  scale_y_continuous(labels = percent) + 
+  coord_flip() + 
+  labs(y = "Percent Profit", x = "") + 
+  theme(axis.text.y=element_blank(), axis.ticks.y=element_blank())
+
+grid.arrange(top = textGrob("Loan Completion and Profit by Loan Origination Quarter", gp = gpar(fontsize=18)), quarter1, quarter2, ncol=2)
 ```
+
+Although I can't explain the cause of the trends seen here without knowing more about the company history, it is clear that there are lengthy periods where up to about 50% of closed loans are charged off or defaulted on, and correspondingly lengthy periods where lenders, on average, lose a significant amount of money by investing.  This suggests that while there may be periods when it is generally profitable for lenders to invest in Prosper loans, overall it is a relatively risky venture, and there are periods when lenders will on average lose a lot of money.  This may however in part be due to lenders specifically seeking out high-risk and high-interest loans, even if they are relatively unlikely to pay off, ultimately.
 
 ## Reflection
 
-<!-- This should contain a few sentences about your struggles, successes, and ideas for future exploration on the data set (see the Project Rubric for more information). -->
+First, I encountered some amount of trouble interpreting the data without any background story.  Googling around for information on Prosper loans online, I was able to get a general idea of what the company was doing, which made interpreting the data significantly easier.
 
-First, I encountered a fair bit of trouble interpreting the data without any background story.  Googling around for info on Prosper loans online, I was able to get a general idea of what the company was doing, which made interpreting the data somewhat easier.
+At this point, it is still difficult to say much about this data without having more information about how the data was collected, why some data is missing, how certain measures were assigned, and how lender profit and borrower terms reflect on the profit of the company.  One would need to take a much closer and more in-depth look at what the company does, what purpose the data serves, how the measures were collected, how they are used, and what they are meant to reflect.
 
-At this point, it is still difficult to say much about this data without knowing, in a lot more detail: what realities the less obvious measures reflect; the story behind the data; how certain measures are gathered and determined; and how the various measures reflect on both profit for the company, and profit for the clients.  What would be needed is to take a much closer and more in-depth look at what the company does, what purpose the data serves, and how the measures were collected and what they reflect.
+Starting with this data set, in the future it may be possible to build a model that is more predictive of lender yield than current measures provided by Prosper.  This would likely be very useful for lenders choosing whether to invest in certain loans, or not.  What would also be interesting is separately gathering data on which factors are most decisive in convincing lenders to invest in certain loans.
