@@ -12,6 +12,7 @@ Introductory Project | [Test a Perceptual Phenomenon](./perceptual-phenomenon) |
 Exploratory Data Analysis | [Explore and Summarize Data](./explore-and-summarize) | Done
 Data Wrangling | Wrangle and Analyze Data |
 Data Story Telling | Create a Tableau Story |
+
 ## License
 
 These projects were submitted by Ekaterina Kravtchenko as part of the Data Analyst Nanodegree at Udacity.
