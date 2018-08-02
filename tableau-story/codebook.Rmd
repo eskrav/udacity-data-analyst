@@ -1,0 +1,166 @@
+---
+title: "Codebook"
+author: "Ekaterina Kravtchenko"
+date: "8/2/2018"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    css: styles.css
+---
+
+<script src="hideOutput.js"></script>
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(data.table)
+```
+
+## Loading data and renaming columns
+
+First, I will load the dictionary for easy reference.
+
+```{r dictionary, cache=TRUE, message=FALSE, warning=FALSE}
+dict <- read_csv("pisadict2012.csv") %>% spread(X1, x)
+dict[["AGE"]]
+```
+
+Now I will load the data, and take a preliminary look.  I will also make a copy of the data to clean.
+
+<div class="fold o">
+```{r load data, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+pisa <- pisa_orig <- fread("pisa2012.csv")
+# pander::pander(head(pisa_orig), split.table = 60)
+```
+</div>
+
+```{r glimpse}
+# glimpse(pisa_orig)
+```
+
+I will convert strings to factors as a first approximation, as it appears that strings (with few exceptions) are category labels.  I will also remove any white space padding.
+
+```{r strings to factors, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+pisa <- mutate_if(pisa, is.character, as.factor) %>% mutate_if(is.factor, funs(`levels<-`(., trimws(levels(.)))))
+```
+
+
+## Identifying issues
+
+The column names are opaque, and the dataset is haphazardly organized.  Based on the column name dictionary, I will attempt to organize the data before interpreting what's going on in the specific columns.  The survey responses particularly need to be organized.  Eventually I will want to rename the columns, but for now I want to be able to easily addess their labels in the dictionary.
+
+```{r, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
+read_csv("pisadict2012.csv") %>% print(n=Inf)
+```
+
+```{r}
+summary(pisa[["ST07Q01"]])
+summary(pisa[["ST07Q02"]])
+summary(pisa[["ST07Q03"]])
+```
+
+### Grouping questions
+
+Below I will put questions related to the same category (e.g., grade repeated, truancy, family at home, highest parent education) in one column, and the response in another column.
+
+#### Repeating grades
+
+There are multiple columns reflecting grades repeated; I will create one column for grades repeated, and one for the response.
+
+```{r collapse repeated grades, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
+pisa <- pisa %>%
+  gather(key = "repeated_grades", value = "repeated_grades_response", ST07Q01:ST07Q03) %>%
+  mutate(repeated_grades = gsub("ST07Q01", "ISCED 1", repeated_grades)) %>%
+  mutate(repeated_grades = gsub("ST07Q02", "ISCED 2", repeated_grades)) %>%
+  mutate(repeated_grades = gsub("ST07Q03", "ISCED 3", repeated_grades))
+```
+
+#### Truancy
+
+There are multiple columns reflecting truancy; there should be one column for the level in question, and one for the response.
+
+```{r collapse truancy, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
+pisa <- pisa %>%
+  gather(key = "truancy_level", value = "truancy_response", ST08Q01:ST115Q01) %>%
+  mutate(truancy_level = gsub("ST08Q01", "Late for School", truancy_level)) %>%
+  mutate(truancy_level = gsub("ST09Q01", "Skip whole school day", truancy_level)) %>%
+  mutate(truancy_level = gsub("ST115Q01", "Skip classes within school day", truancy_level))
+```
+
+#### At home
+
+```{r collapse at home, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
+pisa <- pisa %>%
+  gather(key = "family_home", value = "family_home_response", ST11Q01:ST11Q06) %>%
+  mutate(family_home = gsub("ST11Q01", "Mother", family_home)) %>%
+  mutate(family_home = gsub("ST11Q02", "Father", family_home)) %>%
+  mutate(family_home = gsub("ST11Q03", "Brothers", family_home)) %>%
+  mutate(family_home = gsub("ST11Q04", "Sisters", family_home)) %>%
+  mutate(family_home = gsub("ST11Q05", "Grandparents", family_home)) %>%
+  mutate(family_home = gsub("ST11Q06", "Others", family_home))
+```
+
+#### Parent education
+
+There are multiple columns all reflecting the highest education level of each parent - I will collapse this to two.
+
+```{r collapse parent education, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
+pisa$mother_highest_ISCED_level <- ifelse(pisa$ST14Q01=="Yes","6",ifelse(pisa$ST14Q03=="Yes","5B",ifelse(pisa$ST14Q02=="Yes","5A",ifelse(pisa$ST14Q04=="Yes","4",ifelse(pisa$ST13Q01=="<ISCED level 3B, 3C>","3B/C",ifelse(pisa$ST13Q01=="<ISCED level 3A>","3A",ifelse(pisa$ST13Q01=="<ISCED level 2>","2",ifelse(ifelse(pisa$ST13Q01=="<ISCED level 1>","1",ifelse(ifelse(pisa$ST13Q01=="She did not complete <ISCED level 1>","None",NA)))))))))))
+
+pisa$father_highest_ISCED_level <- ifelse(pisa$ST18Q01=="Yes","6",ifelse(pisa$ST18Q03=="Yes","5B",ifelse(pisa$ST18Q02=="Yes","5A",ifelse(pisa$ST18Q04=="Yes","4",ifelse(pisa$ST17Q01=="<ISCED level 3B, 3C>","3B/C",ifelse(pisa$ST17Q01=="<ISCED level 3A>","3A",ifelse(pisa$ST17Q01=="<ISCED level 2>","2",ifelse(ifelse(pisa$ST17Q01=="<ISCED level 1>","1",ifelse(ifelse(pisa$ST17Q01=="He did not complete <ISCED level 1>","None",NA)))))))))))
+
+parent_ed <- c("ST13Q01","ST14Q01","ST14Q02","ST14Q03","ST14Q04","ST17Q01","ST18Q01","ST18Q02","ST18Q03","ST18Q04")
+
+pisa <- select(pisa, -one_of(parent_ed))
+```
+
+
+#### Country of birth
+
+```{r collapse birth country, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
+pisa <- pisa %>%
+  gather(key = "int_country_birth", value = "int_country_birth_response", ST20Q01:ST20Q03) %>%
+  mutate(int_country_birth = gsub("ST20Q01", "Self", int_country_birth)) %>%
+  mutate(int_country_birth = gsub("ST20Q02", "Mother", int_country_birth)) %>%
+  mutate(int_country_birth = gsub("ST20Q03", "Father", int_country_birth))
+```
+
+### Rest
+
+`V1` seems to simply be a row index, and should be removed.
+
+`CNT` is a country code - unclear how this differs from `NC`, the "National Centre 6-digit Code".
+
+```{r, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
+# filter(pisa, as.character(CNT) != as.character(NC))[,c("CNT","NC")] %>% distinct()
+
+# pisa[4744,1:7]
+
+filter(pisa, as.character(CNT) != as.character(NC))[,c("CNT","NC")] %>% distinct()
+```
+
+These appear to be largely redundant, but countries are sometimes described slightly differently, and `CNT` sometimes refers to states within the US (and sometimes to the US as a whole, which is confusing).  In other cases, countries appear to have padding from spaces, which I fix above.
+
+Sometimes `CNT` provides a bit more regional detail, and sometimes `NC`.  I'll see if this information is represented elsewhere, and attempt to simplify taking into account how I can use this information in Tableau.
+
+
+
+
+Many of the following columns appear to be responses to questionnaires - the questions should be in one column, and the answers in another.
+
+### Issues list
+
+* Get rid of V1 column, which is simply a row ID.
+* Resolve country label redundancy without getting rid of more fine-grained regional data, with eye to what can be done in Tableau
+* Put questions in one column, and answers in another.
+
+## Cleaning data
+
+### Issue 1
+
+#### Describe
+
+#### Clean
+
+#### Test
