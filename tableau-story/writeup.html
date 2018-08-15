@@ -128,17 +128,31 @@ $(document).ready(function () {
 </div>
 
 
+<div id="materials" class="section level2">
+<h2>Materials</h2>
 <ul>
-<li><a href="https://public.tableau.com/views/PISA_wealth_final/TheRelationshipBetweenSocio-EconomicWell-BeingandPISATestPerformance?:embed=y&amp;:display_count=yes&amp;publish=yes">Final visualization</a></li>
-<li><a href="https://public.tableau.com/shared/6G4FQZ4J8?:display_count=yes">Initial visualization</a></li>
-<li><a href="./codebook.html">Codebook</a></li>
+<li><a href="https://public.tableau.com/views/PISA_wealth_final/TheRelationshipBetweenSocio-EconomicWell-BeingandPISATestPerformance?:embed=y&amp;:display_count=yes&amp;publish=yes"><strong>Final visualization</strong></a></li>
+<li><a href="https://public.tableau.com/shared/6G4FQZ4J8?:display_count=yes"><strong>Initial visualization</strong></a></li>
+<li><a href="./codebook.html"><strong>Codebook</strong></a></li>
+<li><strong>Data files</strong> used for final visualization: <a href="./subregion_data.csv">subregion_data.csv</a>, <a href="./country_data.csv">country_data.csv</a></li>
+<li><strong>Feedback</strong>: <a href="./feedback.m4a">feedback.m4a</a></li>
 </ul>
+</div>
 <div id="summary" class="section level2">
 <h2>Summary</h2>
 <p>My project focuses on the 2012 PISA dataset. In my visualization, I show that various factors connected to individual and region-wide socio-economic well-being are predictive of international and regional math, reading, and science test scores.</p>
 </div>
 <div id="design" class="section level2">
 <h2>Design</h2>
+<p>I wanted to plot these primary trends:</p>
+<ul>
+<li><strong>Test results by country</strong>: this is likely most easily visualized using a map, with test results color-coded. To avoid use of multiple maps, I made one map, and an interactive parameter which allows users to select the test result they want to see.</li>
+<li><strong>Relationship of scores with SES (socio-economic status)</strong>: I chose several obvious quantitative measures of family socio-economic status: family wealth; family social, economic, and cultural status; and parents’ years of education. I also calculated one regional measure of socio-economic well-being, after noticing that it more consistently predicted the success of the highest-scoring countries: wealth inequality. Wealth inequality plausibly influences regional test scores, as it may ensure that access to good schooling is not determined by relative family wealth, and that all students receive equally adequate (or, perhaps, equally inadequate) schooling.</li>
+<li><strong>Highest-scoring countries/country rank</strong>: The relative rank of countries is more difficult to spot using a map. For this purpose, I created a bar plot which allows users to sort and select results. Again, to avoid the creating of multiple plots, I allow users to select which test subject to plot (this is not critical, however, as test scores are clearly highly correlated). Since I want the user to see a pattern in multiple measures, however, I do create separate plots for all these measures - otherwise, too much effort is required on the user’s part to find all the information I want them to see.</li>
+<li><strong>Relationship between country rank and SES (socio-economic status)</strong>: The clearest and most economical way to communicate this relationship that I could think of was to color the country bars according to how ‘well’ they scored on various (scaled) measures of socio-economic status. I selected an orange/red to blue scale, as this seems most easily interpreted as ranging from ‘poor’ to ‘good.’ This makes it relatively easy to see, for example, if all high-scoring countries also ‘score’ well on socio-economic measures (or if low-scoring countries ‘score’ poorly). The use and purpose of color is briefly explained.</li>
+<li><strong>Correlation between scores and SES</strong>: As country data is relatively sparse, I plot the correlations between group scores and socio-economic measures at the subregional level, where there data is abundant. This also makes it more likely that countries where data is very sparse, and perhaps only collected from a single region, will not unduly influence the apparent relationship between measures. Further, if the same patterns seen at the international level are replicated at the subregional level, it strengthens the hypothesis of a relationship between the relevant variables. The points are tentatively color-coded for consistency, and to make it easier for the user to visually examine the strength of the relationship between SES measures and test scores in the case of either ‘good’ or ‘bad’ values.</li>
+<li><strong>Overall story</strong>: Space permitting, the user is guided explicitly through the visualizations, and the major patterns they are expected to spot are explicitly pointed out.</li>
+</ul>
 <p>After collecting feedback, I made the graphic somewhat less free-form and interactive. It became clear that simply setting up the scenario, including clues to guide the user in gaining their own insights, did not effectively get the intended point across. In the end, I decided to focus on a relatively limited phenomenon (I had originally planned to add more unrelated measures that the user could dynamically plot, if they wanted), clearly spell out intended conclusions, present all critical plots instead of expecting the user to dynamically generate them, and provide a more clear guide to interpreting use of color. I also changed the color schemes to something (hopefully) more easily interpretable (in terms of a consistent gradient from ‘good’ to ‘bad’).</p>
 </div>
 <div id="feedback" class="section level2">
