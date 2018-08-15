@@ -1,7 +1,7 @@
 ---
-title: "Writeup"
+title: "Tableau Story: Writeup"
 author: "Ekaterina Kravtchenko"
-date: "8/2/2018"
+date: "8/15/2018"
 output: html_document
 ---
 
@@ -9,33 +9,31 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-* Write-up: PDF or Markdown file that includes links to your Tableau Public workbooks, published online, and a write-up with four sections. See HERE if you need help publishing your Tableau Public Workbook.
-    - Summary: in no more than 4 sentences, briefly introduce your data visualization and add any context that can help readers understand it
-    - Design: explain any design choices you made including changes to the visualization after collecting feedback
-    - Feedback: include all feedback you received from others on your visualization from the first sketch to the final visualization
-    - Resources: list any sources you consulted to create your visualization
+* [Final visualization](https://public.tableau.com/views/PISA_wealth_final/TheRelationshipBetweenSocio-EconomicWell-BeingandPISATestPerformance?:embed=y&:display_count=yes&publish=yes)
+* [Initial visualization](https://public.tableau.com/shared/6G4FQZ4J8?:display_count=yes)
+* [Codebook](./codebook.html)
 
-## Step Five - Get Feedback
+## Summary
 
-Share your visualization with *at least one other person* and document their feedback. There are many ways to get feedback, and more feedback is generally better! Here are some options.
+My project focuses on the 2012 PISA dataset.  In my visualization, I show that various factors connected to individual and region-wide socio-economic well-being are predictive of international and regional math, reading, and science test scores.  
 
-* Share your visualization with others in person and have them think aloud as they read and explore the graphic so you can document what stands out to them and how they interpret the graphic.
-* Share a link to your project in the Data Analyst Nanodegree Slack and ask others to share constructive criticisms. Be sure to offer advice to others who are seeking feedback too!
+## Design
 
-You might need to ask specific questions to prompt the reader. Here are some questions to help you. You can, of course, ask others.
+After collecting feedback, I made the graphic somewhat less free-form and interactive.  It became clear that simply setting up the scenario, including clues to guide the user in gaining their own insights, did not effectively get the intended point across.  In the end, I decided to focus on a relatively limited phenomenon (I had originally planned to add more unrelated measures that the user could dynamically plot, if they wanted), clearly spell out intended conclusions, present all critical plots instead of expecting the user to dynamically generate them, and provide a more clear guide to interpreting use of color.  I also changed the color schemes to something (hopefully) more easily interpretable (in terms of a consistent gradient from 'good' to 'bad').
 
-* What do you notice in the visualization?
-* What questions do you have about the data?
-* What relationships do you notice?
-* What do you think is the main takeaway from this visualization?
-* Is there something you don’t understand in the graphic?
+## Feedback
 
-## Step Six - Document Feedback and Improve the Visualization
+The feedback I got was the following, summarized:
 
-For each person that gives you feedback, add the person’s feedback to your write-up file in the Feedback section. As you improve and iterate on your visualization, update the visualization *AND* describe any changes in the Design section of the write-up.
+* Insights to be gained were completely opaque - the user was able to compare country performance, but did not get the link between socio-economic factors and test scores at all.
+* Use of color was confusing and poorly explained - the user was unable to tell if a color signified something 'good,' something 'bad,' or nothing at all - or which patterns they were supposed to spot.
+* Map moved around too much and was somewhat difficult to work with/zoom (this seems to be a flaw inherent to Tableau, however).
+* It was unclear what, in fact, was being plotted.  To some degree, the plots alone seem insufficient to explain what the PISA is, but this could nevertheless be made clearer.
 
-You should save multiple versions of your data visualization after you make changes to it. Remember to save related files with similar numbers.
+## Resources
 
-When should you save your files? You should save your files whenever you have a working version of your data visualization. If you get feedback and make changes, then create a new file and save the file as another version.
+The resources I used are the following:
 
-Your goal is to build evidence that you have shared your visualization, received feedback, and responded to that feedback. *You need to submit an initial version of your data visualization and the final version with the corresponding write-up.*
+* PISA 2012 [technical report](./PISA-2012-technical-report-final.pdf), and [results overview](./pisa-2012-results-overview.pdf), for interpreting results and comparing generated country test scores.
+* [`intsvy`](https://www.jstatsoft.org/article/view/v081i07/0) R package for generating country-wide and regional test scores, as the PISA guides indicate individual student scores are not informative (https://nces.ed.gov/surveys/pisa/faq.asp#10).
+* Info on calculating Gini coefficient (measure of wealth inequality): https://en.wikipedia.org/wiki/Gini_coefficient

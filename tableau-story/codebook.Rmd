@@ -1,23 +1,23 @@
 ---
 title: "Codebook"
 author: "Ekaterina Kravtchenko"
-date: "8/2/2018"
+date: "8/15/2018"
 output: 
   html_document:
     toc: true
     toc_float: true
-    css: styles.css
 ---
-
-<script src="hideOutput.js"></script>
 
 ```{r setup, include=FALSE, message=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(data.table)
+library(intsvy)
+library(DescTools)
+library(scales)
 ```
 
-## Loading data and renaming columns
+## Loading data
 
 First, I will load the dictionary for easy reference.
 
@@ -28,139 +28,954 @@ dict[["AGE"]]
 
 Now I will load the data, and take a preliminary look.  I will also make a copy of the data to clean.
 
-<div class="fold o">
 ```{r load data, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
 pisa <- pisa_orig <- fread("pisa2012.csv")
-# pander::pander(head(pisa_orig), split.table = 60)
 ```
-</div>
 
 ```{r glimpse}
-# glimpse(pisa_orig)
+glimpse(pisa_orig)
 ```
 
-I will convert strings to factors as a first approximation, as it appears that strings (with few exceptions) are category labels.  I will also remove any white space padding.
+Here I remove any white space padding.
 
-```{r strings to factors, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
-pisa <- mutate_if(pisa, is.character, as.factor) %>% mutate_if(is.factor, funs(`levels<-`(., trimws(levels(.)))))
+```{r trim white space, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+pisa <- mutate_if(pisa, is.character, trimws) %>% 
+  mutate_if(is.character, as.factor)
 ```
 
+## Regional data
 
-## Identifying issues
+I get the regional data up here, as the columns are more difficult to manipulate once they are renamed to be more descriptive.
 
-The column names are opaque, and the dataset is haphazardly organized.  Based on the column name dictionary, I will attempt to organize the data before interpreting what's going on in the specific columns.  The survey responses particularly need to be organized.  Eventually I will want to rename the columns, but for now I want to be able to easily addess their labels in the dictionary.
+I use the `intsvy` `R` package with `pisa` configuration to replicate country-level scores and compute regional scores.
 
-```{r, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
-read_csv("pisadict2012.csv") %>% print(n=Inf)
+### School
+
+I'll first see if there's enough data per school to make reasonable generalizations:
+
+```{r data per school, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+pisa %>% 
+  group_by(STRATUM,SCHOOLID) %>% 
+  tally() %>%
+  arrange(desc(n))
 ```
 
-```{r}
-summary(pisa[["ST07Q01"]])
-summary(pisa[["ST07Q02"]])
-summary(pisa[["ST07Q03"]])
+Many schools have very few records - including records for only one individual student, at which point the data becomes uninterpretable (https://nces.ed.gov/surveys/pisa/faq.asp#10).  This makes school too fine-grained a granularity to use to look at the data.
+
+### Country-level
+
+Below, I replicate country scores for PISA 2012.
+
+#### Math
+
+```{r country math, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_math <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MATH","PV2MATH","PV3MATH","PV4MATH","PV5MATH"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Math (country)` = Mean)
+
+head(arrange(country_math, desc(`Math (country)`)))
 ```
 
-### Grouping questions
+##### Math Subscale: Change and Relationships
 
-Below I will put questions related to the same category (e.g., grade repeated, truancy, family at home, highest parent education) in one column, and the response in another column.
+```{r country math change, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_math_cr <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MACC","PV2MACC","PV3MACC","PV4MACC","PV5MACC"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Math.ChangeRel (country)` = Mean)
 
-#### Repeating grades
+head(arrange(country_math_cr, desc(`Math.ChangeRel (country)`)))
+```
 
-There are multiple columns reflecting grades repeated; I will create one column for grades repeated, and one for the response.
+##### Math Subscale: Quantity
 
-```{r collapse repeated grades, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
+```{r country math quantity, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_math_q <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MACQ","PV2MACQ","PV3MACQ","PV4MACQ","PV5MACQ"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Math.Quantity (country)` = Mean)
+
+head(arrange(country_math_q, desc(`Math.Quantity (country)`)))
+```
+
+##### Math Subscale: Space and Shape
+
+```{r country math space, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_math_ss <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MACS","PV2MACS","PV3MACS","PV4MACS","PV5MACS"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Math.SpaceShape (country)` = Mean)
+
+head(arrange(country_math_ss, desc(`Math.SpaceShape (country)`)))
+```
+
+##### Math Subscale: Uncertainty and Data
+
+```{r country math uncertainty, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_math_uncd <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MACU","PV2MACU","PV3MACU","PV4MACU","PV5MACU"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Math.UncData (country)` = Mean)
+
+head(arrange(country_math_uncd, desc(`Math.UncData (country)`)))
+```
+
+##### Math Subscale: Employ
+
+```{r country math employ, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_math_emp <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MAPE","PV2MAPE","PV3MAPE","PV4MAPE","PV5MAPE"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Mean.Employ (country)` = Mean)
+
+head(arrange(country_math_emp, desc(`Mean.Employ (country)`)))
+```
+
+##### Math Subscale: Formulate
+
+```{r country math formulate, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_math_form <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MAPF","PV2MAPF","PV3MAPF","PV4MAPF","PV5MAPF"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Math.Formulate (country)` = Mean)
+
+head(arrange(country_math_form, desc(`Math.Formulate (country)`)))
+```
+
+##### Math Subscale: Interpret
+
+```{r country math interpret, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_math_int <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MAPI","PV2MAPI","PV3MAPI","PV4MAPI","PV5MAPI"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Math.Interpret (country)` = Mean)
+
+head(arrange(country_math_int, desc(`Math.Interpret (country)`)))
+```
+
+#### Reading
+
+```{r country reading, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_read <- intsvy.mean.pv(data = pisa, pvnames=c("PV1READ","PV2READ","PV3READ","PV4READ","PV5READ"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Reading (country)` = Mean)
+
+head(arrange(country_read, desc(`Reading (country)`)))
+```
+
+#### Science
+
+```{r country science, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_sci <- intsvy.mean.pv(data = pisa, pvnames=c("PV1SCIE","PV2SCIE","PV3SCIE","PV4SCIE","PV5SCIE"), config=pisa_conf, by="CNT") %>% select(CNT, Mean) %>% rename(`Science (country)` = Mean)
+
+head(arrange(country_sci, desc(`Science (country)`)))
+```
+
+#### Join data
+
+```{r country join, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_data <- list(country_math, country_math_cr, country_math_q, country_math_ss, country_math_uncd, country_math_emp, country_math_form, country_math_int, country_read, country_sci) %>%
+  reduce(left_join, by = "CNT")
+```
+
+### Sub-region
+
+Below, I compute more fine-grained regional scores.
+
+#### Math
+
+```{r subregion math, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_math <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MATH","PV2MATH","PV3MATH","PV4MATH","PV5MATH"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Math (region)` = Mean)
+
+head(arrange(subregion_math, desc(`Math (region)`)))
+```
+
+##### Math Subscale: Change and Relationships
+
+```{r subregion math change, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_math_cr <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MACC","PV2MACC","PV3MACC","PV4MACC","PV5MACC"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Math.ChangeRel (region)` = Mean)
+
+head(arrange(subregion_math_cr, desc(`Math.ChangeRel (region)`)))
+```
+
+##### Math Subscale: Quantity
+
+```{r subregion math quantity, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_math_q <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MACQ","PV2MACQ","PV3MACQ","PV4MACQ","PV5MACQ"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Math.Quantity (region)` = Mean)
+
+head(arrange(subregion_math_q, desc(`Math.Quantity (region)`)))
+```
+
+##### Math Subscale: Space and Shape
+
+```{r subregion math space, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_math_ss <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MACS","PV2MACS","PV3MACS","PV4MACS","PV5MACS"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Math.SpaceShape (region)` = Mean)
+
+head(arrange(subregion_math_ss, desc(`Math.SpaceShape (region)`)))
+```
+
+##### Math Subscale: Uncertainty and Data
+
+```{r subregion math uncertainty, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_math_uncd <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MACU","PV2MACU","PV3MACU","PV4MACU","PV5MACU"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Math.UncData (region)` = Mean)
+
+head(arrange(subregion_math_uncd, desc(`Math.UncData (region)`)))
+```
+
+##### Math Subscale: Employ
+
+```{r subregion math employ, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_math_emp <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MAPE","PV2MAPE","PV3MAPE","PV4MAPE","PV5MAPE"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Mean.Employ (region)` = Mean)
+
+head(arrange(subregion_math_emp, desc(`Mean.Employ (region)`)))
+```
+
+##### Math Subscale: Formulate
+
+```{r subregion math formulate, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_math_form <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MAPF","PV2MAPF","PV3MAPF","PV4MAPF","PV5MAPF"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Math.Formulate (region)` = Mean)
+
+head(arrange(subregion_math_form, desc(`Math.Formulate (region)`)))
+```
+
+##### Math Subscale: Interpret
+
+```{r subregion math interpret, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_math_int <- intsvy.mean.pv(data = pisa, pvnames=c("PV1MAPI","PV2MAPI","PV3MAPI","PV4MAPI","PV5MAPI"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Math.Interpret (region)` = Mean)
+
+head(arrange(subregion_math_int, desc(`Math.Interpret (region)`)))
+```
+
+#### Reading
+
+```{r subregion reading, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_read <- intsvy.mean.pv(data = pisa, pvnames=c("PV1READ","PV2READ","PV3READ","PV4READ","PV5READ"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Reading (region)` = Mean)
+
+head(arrange(subregion_read, desc(`Reading (region)`)))
+```
+
+#### Science
+
+```{r subregion science, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_sci <- intsvy.mean.pv(data = pisa, pvnames=c("PV1SCIE","PV2SCIE","PV3SCIE","PV4SCIE","PV5SCIE"), config=pisa_conf, by="STRATUM") %>% select(STRATUM, Mean) %>% rename(`Science (region)` = Mean)
+
+head(arrange(subregion_sci, desc(`Science (region)`)))
+```
+
+#### Join data
+
+```{r subregion join, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+subregion_data <- list(subregion_math, subregion_math_cr, subregion_math_q, subregion_math_ss, subregion_math_uncd, subregion_math_emp, subregion_math_form, subregion_math_int, subregion_read, subregion_sci) %>%
+  reduce(left_join, by = "STRATUM")
+```
+
+## Cleaning
+
+### Dates
+
+`99` likely signifies that the month of birth is not known; in any case, `99` is not a month.
+
+```{r fix month NA, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+pisa[pisa$ST03Q01=="99",]$ST03Q01 <- NA
+```
+
+### Rename columns
+
+Here I will rename columns for ease of identifying measures once in Tableau, and selecting which measures to plot.
+
+#### PISA data
+
+```{r rename columns, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
 pisa <- pisa %>%
-  gather(key = "repeated_grades", value = "repeated_grades_response", ST07Q01:ST07Q03) %>%
-  mutate(repeated_grades = gsub("ST07Q01", "ISCED 1", repeated_grades)) %>%
-  mutate(repeated_grades = gsub("ST07Q02", "ISCED 2", repeated_grades)) %>%
-  mutate(repeated_grades = gsub("ST07Q03", "ISCED 3", repeated_grades))
+  rename("CNT: Country code 3-character"=CNT,
+  "SUBNATIO: Adjudicated sub-region code 7-digit code (3-digit country code + region ID + stratum ID)"=SUBNATIO,
+  "STRATUM: Stratum ID 7-character (cnt + region ID + original stratum ID)"=STRATUM,
+  "OECD: OECD country"=OECD,
+  "NC: National Centre 6-digit Code"=NC,
+  "SCHOOLID: School ID 7-digit (region ID + stratum ID + 3-digit school ID)"=SCHOOLID,
+  "STIDSTD: Student ID"=STIDSTD,
+  "ST01Q01: International Grade"=ST01Q01,
+  "ST02Q01: National Study Programme"=ST02Q01,
+  "ST03Q01: Birth - Month"=ST03Q01,
+  "ST03Q02: Birth - Year"=ST03Q02,
+  "ST04Q01: Gender"=ST04Q01,
+  "ST05Q01: Attend <ISCED 0>"=ST05Q01,
+  "ST06Q01: Age at <ISCED 1>"=ST06Q01,
+  "ST07Q01: Repeat - <ISCED 1>"=ST07Q01,
+  "ST07Q02: Repeat - <ISCED 2>"=ST07Q02,
+  "ST07Q03: Repeat - <ISCED 3>"=ST07Q03,
+  "ST08Q01: Truancy - Late for School"=ST08Q01,
+  "ST09Q01: Truancy - Skip whole school day"=ST09Q01,
+  "ST115Q01: Truancy - Skip classes within school day"=ST115Q01,
+  "ST11Q01: At Home - Mother"=ST11Q01,
+  "ST11Q02: At Home - Father"=ST11Q02,
+  "ST11Q03: At Home - Brothers"=ST11Q03,
+  "ST11Q04: At Home - Sisters"=ST11Q04,
+  "ST11Q05: At Home - Grandparents"=ST11Q05,
+  "ST11Q06: At Home - Others"=ST11Q06,
+  "ST13Q01: Mother <Highest Schooling>"=ST13Q01,
+  "ST14Q01: Mother Qualifications - <ISCED level 6>"=ST14Q01,
+  "ST14Q02: Mother Qualifications - <ISCED level 5A>"=ST14Q02,
+  "ST14Q03: Mother Qualifications - <ISCED level 5B>"=ST14Q03,
+  "ST14Q04: Mother Qualifications - <ISCED level 4>"=ST14Q04,
+  "ST15Q01: Mother Current Job Status"=ST15Q01,
+  "ST17Q01: Father <Highest Schooling>"=ST17Q01,
+  "ST18Q01: Father Qualifications - <ISCED level 6>"=ST18Q01,
+  "ST18Q02: Father Qualifications - <ISCED level 5A>"=ST18Q02,
+  "ST18Q03: Father Qualifications - <ISCED level 5B>"=ST18Q03,
+  "ST18Q04: Father Qualifications - <ISCED level 4>"=ST18Q04,
+  "ST19Q01: Father Current Job Status"=ST19Q01,
+  "ST20Q01: Country of Birth International - Self"=ST20Q01,
+  "ST20Q02: Country of Birth International - Mother"=ST20Q02,
+  "ST20Q03: Country of Birth International - Father"=ST20Q03,
+  "ST21Q01: Age of arrival in country of test"=ST21Q01,
+  "ST25Q01: International Language at Home"=ST25Q01,
+  "ST26Q01: Possessions - desk"=ST26Q01,
+  "ST26Q02: Possessions - own room"=ST26Q02,
+  "ST26Q03: Possessions - study place"=ST26Q03,
+  "ST26Q04: Possessions - computer"=ST26Q04,
+  "ST26Q05: Possessions - software"=ST26Q05,
+  "ST26Q06: Possessions - Internet"=ST26Q06,
+  "ST26Q07: Possessions - literature"=ST26Q07,
+  "ST26Q08: Possessions - poetry"=ST26Q08,
+  "ST26Q09: Possessions - art"=ST26Q09,
+  "ST26Q10: Possessions - textbooks"=ST26Q10,
+  "ST26Q11: Possessions - technical reference books"=ST26Q11,
+  "ST26Q12: Possessions - dictionary"=ST26Q12,
+  "ST26Q13: Possessions - dishwasher"=ST26Q13,
+  "ST26Q14: Possessions - DVD"=ST26Q14,
+  "ST26Q15: Possessions - Country item 1"=ST26Q15,
+  "ST26Q16: Possessions - Country item 2"=ST26Q16,
+  "ST26Q17: Possessions - Country item 3"=ST26Q17,
+  "ST27Q01: How many - cellular phones"=ST27Q01,
+  "ST27Q02: How many - televisions"=ST27Q02,
+  "ST27Q03: How many - computers"=ST27Q03,
+  "ST27Q04: How many - cars"=ST27Q04,
+  "ST27Q05: How many - rooms bath or shower"=ST27Q05,
+  "ST28Q01: How many books at home"=ST28Q01,
+  "ST29Q01: Math Interest - Enjoy Reading"=ST29Q01,
+  "ST29Q02: Instrumental Motivation - Worthwhile for Work"=ST29Q02,
+  "ST29Q03: Math Interest - Look Forward to Lessons"=ST29Q03,
+  "ST29Q04: Math Interest - Enjoy Maths"=ST29Q04,
+  "ST29Q05: Instrumental Motivation - Worthwhile for Career Chances"=ST29Q05,
+  "ST29Q06: Math Interest - Interested"=ST29Q06,
+  "ST29Q07: Instrumental Motivation - Important for Future Study"=ST29Q07,
+  "ST29Q08: Instrumental Motivation - Helps to Get a Job"=ST29Q08,
+  "ST35Q01: Subjective Norms - Friends Do Well in Mathematics"=ST35Q01,
+  "ST35Q02: Subjective Norms - Friends Work Hard on Mathematics"=ST35Q02,
+  "ST35Q03: Subjective Norms - Friends Enjoy Mathematics Tests"=ST35Q03,
+  "ST35Q04: Subjective Norms - Parents Believe Studying Mathematics Is Important"=ST35Q04,
+  "ST35Q05: Subjective Norms - Parents Believe Mathematics Is Important for Career"=ST35Q05,
+  "ST35Q06: Subjective Norms - Parents Like Mathematics"=ST35Q06,
+  "ST37Q01: Math Self-Efficacy - Using a Train Timetable"=ST37Q01,
+  "ST37Q02: Math Self-Efficacy - Calculating TV Discount"=ST37Q02,
+  "ST37Q03: Math Self-Efficacy - Calculating Square Metres of Tiles"=ST37Q03,
+  "ST37Q04: Math Self-Efficacy - Understanding Graphs in Newspapers"=ST37Q04,
+  "ST37Q05: Math Self-Efficacy - Solving Equation 1"=ST37Q05,
+  "ST37Q06: Math Self-Efficacy - Distance to Scale"=ST37Q06,
+  "ST37Q07: Math Self-Efficacy - Solving Equation 2"=ST37Q07,
+  "ST37Q08: Math Self-Efficacy - Calculate Petrol Consumption Rate"=ST37Q08,
+  "ST42Q01: Math Anxiety - Worry That It Will Be Difficult"=ST42Q01,
+  "ST42Q02: Math Self-Concept - Not Good at Maths"=ST42Q02,
+  "ST42Q03: Math Anxiety - Get Very Tense"=ST42Q03,
+  "ST42Q04: Math Self-Concept - Get Good <Grades>"=ST42Q04,
+  "ST42Q05: Math Anxiety - Get Very Nervous"=ST42Q05,
+  "ST42Q06: Math Self-Concept - Learn Quickly"=ST42Q06,
+  "ST42Q07: Math Self-Concept - One of Best Subjects"=ST42Q07,
+  "ST42Q08: Math Anxiety - Feel Helpless"=ST42Q08,
+  "ST42Q09: Math Self-Concept - Understand Difficult Work"=ST42Q09,
+  "ST42Q10: Math Anxiety - Worry About Getting Poor Grades"=ST42Q10,
+  "ST43Q01: Perceived Control - Can Succeed with Enough Effort"=ST43Q01,
+  "ST43Q02: Perceived Control - Doing Well is Completely Up to Me"=ST43Q02,
+  "ST43Q03: Perceived Control - Family Demands and Problems"=ST43Q03,
+  "ST43Q04: Perceived Control - Different Teachers"=ST43Q04,
+  "ST43Q05: Perceived Control - If I Wanted I Could Perform Well"=ST43Q05,
+  "ST43Q06: Perceived Control - Perform Poorly Regardless"=ST43Q06,
+  "ST44Q01: Attributions to Failure - Not Good at Maths Problems"=ST44Q01,
+  "ST44Q03: Attributions to Failure - Teacher Did Not Explain Well"=ST44Q03,
+  "ST44Q04: Attributions to Failure - Bad Guesses"=ST44Q04,
+  "ST44Q05: Attributions to Failure - Material Too Hard"=ST44Q05,
+  "ST44Q07: Attributions to Failure - Teacher Didnt Get Students Interested"=ST44Q07,
+  "ST44Q08: Attributions to Failure - Unlucky"=ST44Q08,
+  "ST46Q01: Math Work Ethic - Homework Completed in Time"=ST46Q01,
+  "ST46Q02: Math Work Ethic - Work Hard on Homework"=ST46Q02,
+  "ST46Q03: Math Work Ethic - Prepared for Exams"=ST46Q03,
+  "ST46Q04: Math Work Ethic - Study Hard for Quizzes"=ST46Q04,
+  "ST46Q05: Math Work Ethic - Study Until I Understand Everything"=ST46Q05,
+  "ST46Q06: Math Work Ethic - Pay Attention in Classes"=ST46Q06,
+  "ST46Q07: Math Work Ethic - Listen in Classes"=ST46Q07,
+  "ST46Q08: Math Work Ethic - Avoid Distractions When Studying"=ST46Q08,
+  "ST46Q09: Math Work Ethic - Keep Work Organized"=ST46Q09,
+  "ST48Q01: Math Intentions - Mathematics vs. Language Courses After School"=ST48Q01,
+  "ST48Q02: Math Intentions - Mathematics vs. Science Related Major in College"=ST48Q02,
+  "ST48Q03: Math Intentions - Study Harder in Mathematics vs. Language Classes"=ST48Q03,
+  "ST48Q04: Math Intentions - Take Maximum Number of Mathematics vs. Science Classes"=ST48Q04,
+  "ST48Q05: Math Intentions - Pursuing a Career That Involves Mathematics vs. Science"=ST48Q05,
+  "ST49Q01: Math Behaviour - Talk about Maths with Friends"=ST49Q01,
+  "ST49Q02: Math Behaviour - Help Friends with Maths"=ST49Q02,
+  "ST49Q03: Math Behaviour - <Extracurricular> Activity"=ST49Q03,
+  "ST49Q04: Math Behaviour - Participate in Competitions"=ST49Q04,
+  "ST49Q05: Math Behaviour - Study More Than 2 Extra Hours a Day"=ST49Q05,
+  "ST49Q06: Math Behaviour - Play Chess"=ST49Q06,
+  "ST49Q07: Math Behaviour - Computer programming"=ST49Q07,
+  "ST49Q09: Math Behaviour - Participate in Math Club"=ST49Q09,
+  "ST53Q01: Learning Strategies - Important Parts vs. Existing Knowledge vs. Learn by Heart"=ST53Q01,
+  "ST53Q02: Learning Strategies - Improve Understanding vs. New Ways vs. Memory"=ST53Q02,
+  "ST53Q03: Learning Strategies - Other Subjects vs. Learning Goals vs. Rehearse Problems"=ST53Q03,
+  "ST53Q04: Learning Strategies - Repeat Examples vs. Everyday Applications vs. More Information"=ST53Q04,
+  "ST55Q01: Out of school lessons - <test lang>"=ST55Q01,
+  "ST55Q02: Out of school lessons - <maths>"=ST55Q02,
+  "ST55Q03: Out of school lessons - <science>"=ST55Q03,
+  "ST55Q04: Out of school lessons - other"=ST55Q04,
+  "ST57Q01: Out-of-School Study Time - Homework"=ST57Q01,
+  "ST57Q02: Out-of-School Study Time - Guided Homework"=ST57Q02,
+  "ST57Q03: Out-of-School Study Time - Personal Tutor"=ST57Q03,
+  "ST57Q04: Out-of-School Study Time - Commercial Company"=ST57Q04,
+  "ST57Q05: Out-of-School Study Time - With Parent"=ST57Q05,
+  "ST57Q06: Out-of-School Study Time - Computer"=ST57Q06,
+  "ST61Q01: Experience with Applied Maths Tasks - Use Train Timetable"=ST61Q01,
+  "ST61Q02: Experience with Applied Maths Tasks - Calculate Price including Tax"=ST61Q02,
+  "ST61Q03: Experience with Applied Maths Tasks - Calculate Square Metres"=ST61Q03,
+  "ST61Q04: Experience with Applied Maths Tasks - Understand Scientific Tables"=ST61Q04,
+  "ST61Q05: Experience with Pure Maths Tasks - Solve Equation 1"=ST61Q05,
+  "ST61Q06: Experience with Applied Maths Tasks - Use a Map to Calculate Distance"=ST61Q06,
+  "ST61Q07: Experience with Pure Maths Tasks - Solve Equation 2"=ST61Q07,
+  "ST61Q08: Experience with Applied Maths Tasks - Calculate Power Consumption Rate"=ST61Q08,
+  "ST61Q09: Experience with Applied Maths Tasks - Solve Equation 3"=ST61Q09,
+  "ST62Q01: Familiarity with Math Concepts - Exponential Function"=ST62Q01,
+  "ST62Q02: Familiarity with Math Concepts - Divisor"=ST62Q02,
+  "ST62Q03: Familiarity with Math Concepts - Quadratic Function"=ST62Q03,
+  "ST62Q04: Overclaiming - Proper Number"=ST62Q04,
+  "ST62Q06: Familiarity with Math Concepts - Linear Equation"=ST62Q06,
+  "ST62Q07: Familiarity with Math Concepts - Vectors"=ST62Q07,
+  "ST62Q08: Familiarity with Math Concepts - Complex Number"=ST62Q08,
+  "ST62Q09: Familiarity with Math Concepts - Rational Number"=ST62Q09,
+  "ST62Q10: Familiarity with Math Concepts - Radicals"=ST62Q10,
+  "ST62Q11: Overclaiming - Subjunctive Scaling"=ST62Q11,
+  "ST62Q12: Familiarity with Math Concepts - Polygon"=ST62Q12,
+  "ST62Q13: Overclaiming - Declarative Fraction"=ST62Q13,
+  "ST62Q15: Familiarity with Math Concepts - Congruent Figure"=ST62Q15,
+  "ST62Q16: Familiarity with Math Concepts - Cosine"=ST62Q16,
+  "ST62Q17: Familiarity with Math Concepts - Arithmetic Mean"=ST62Q17,
+  "ST62Q19: Familiarity with Math Concepts - Probability"=ST62Q19,
+  "ST69Q01: Min in <class period> - <test lang>"=ST69Q01,
+  "ST69Q02: Min in <class period> - <Maths>"=ST69Q02,
+  "ST69Q03: Min in <class period> - <Science>"=ST69Q03,
+  "ST70Q01: No of <class period> p/wk - <test lang>"=ST70Q01,
+  "ST70Q02: No of <class period> p/wk - <Maths>"=ST70Q02,
+  "ST70Q03: No of <class period> p/wk - <Science>"=ST70Q03,
+  "ST71Q01: No of ALL <class period> a week"=ST71Q01,
+  "ST72Q01: Class Size - No of Students in Test Language Class"=ST72Q01,
+  "ST73Q01: OTL - Algebraic Word Problem in Math Lesson"=ST73Q01,
+  "ST73Q02: OTL - Algebraic Word Problem in Tests"=ST73Q02,
+  "ST74Q01: OTL - Procedural Task in Math Lesson"=ST74Q01,
+  "ST74Q02: OTL - Procedural Task in Tests"=ST74Q02,
+  "ST75Q01: OTL - Pure Math Reasoning in Math Lesson"=ST75Q01,
+  "ST75Q02: OTL - Pure Math Reasoning in Tests"=ST75Q02,
+  "ST76Q01: OTL - Applied Math Reasoning in Math Lesson"=ST76Q01,
+  "ST76Q02: OTL - Applied Math Reasoning in Tests"=ST76Q02,
+  "ST77Q01: Math Teaching - Teacher shows interest"=ST77Q01,
+  "ST77Q02: Math Teaching - Extra help"=ST77Q02,
+  "ST77Q04: Math Teaching - Teacher helps"=ST77Q04,
+  "ST77Q05: Math Teaching - Teacher continues"=ST77Q05,
+  "ST77Q06: Math Teaching - Express opinions"=ST77Q06,
+  "ST79Q01: Teacher-Directed Instruction - Sets Clear Goals"=ST79Q01,
+  "ST79Q02: Teacher-Directed Instruction - Encourages Thinking and Reasoning"=ST79Q02,
+  "ST79Q03: Student Orientation - Differentiates Between Students When Giving Tasks"=ST79Q03,
+  "ST79Q04: Student Orientation - Assigns Complex Projects"=ST79Q04,
+  "ST79Q05: Formative Assessment - Gives Feedback"=ST79Q05,
+  "ST79Q06: Teacher-Directed Instruction - Checks Understanding"=ST79Q06,
+  "ST79Q07: Student Orientation - Has Students Work in Small Groups"=ST79Q07,
+  "ST79Q08: Teacher-Directed Instruction - Summarizes Previous Lessons"=ST79Q08,
+  "ST79Q10: Student Orientation - Plans Classroom Activities"=ST79Q10,
+  "ST79Q11: Formative Assessment - Gives Feedback on Strengths and Weaknesses"=ST79Q11,
+  "ST79Q12: Formative Assessment - Informs about Expectations"=ST79Q12,
+  "ST79Q15: Teacher-Directed Instruction - Informs about Learning Goals"=ST79Q15,
+  "ST79Q17: Formative Assessment - Tells How to Get Better"=ST79Q17,
+  "ST80Q01: Cognitive Activation - Teacher Encourages to Reflect Problems"=ST80Q01,
+  "ST80Q04: Cognitive Activation - Gives Problems that Require to Think"=ST80Q04,
+  "ST80Q05: Cognitive Activation - Asks to Use Own Procedures"=ST80Q05,
+  "ST80Q06: Cognitive Activation - Presents Problems with No Obvious Solutions"=ST80Q06,
+  "ST80Q07: Cognitive Activation - Presents Problems in Different Contexts"=ST80Q07,
+  "ST80Q08: Cognitive Activation - Helps Learn from Mistakes"=ST80Q08,
+  "ST80Q09: Cognitive Activation - Asks for Explanations"=ST80Q09,
+  "ST80Q10: Cognitive Activation - Apply What We Learned"=ST80Q10,
+  "ST80Q11: Cognitive Activation - Problems with Multiple Solutions"=ST80Q11,
+  "ST81Q01: Disciplinary Climate - Students Don\'t Listen"=ST81Q01,
+  "ST81Q02: Disciplinary Climate - Noise and Disorder"=ST81Q02,
+  "ST81Q03: Disciplinary Climate - Teacher Has to Wait Until its Quiet"=ST81Q03,
+  "ST81Q04: Disciplinary Climate - Students Don\'t Work Well"=ST81Q04,
+  "ST81Q05: Disciplinary Climate - Students Start Working Late"=ST81Q05,
+  "ST82Q01: Vignette Teacher Support - Homework Every Other Day/Back in Time"=ST82Q01,
+  "ST82Q02: Vignette Teacher Support - Homework Once a Week/Back in Time"=ST82Q02,
+  "ST82Q03: Vignette Teacher Support - Homework Once a Week/Not Back in Time"=ST82Q03,
+  "ST83Q01: Teacher Support - Lets Us Know We Have to Work Hard"=ST83Q01,
+  "ST83Q02: Teacher Support - Provides Extra Help When Needed"=ST83Q02,
+  "ST83Q03: Teacher Support - Helps Students with Learning"=ST83Q03,
+  "ST83Q04: Teacher Support - Gives Opportunity to Express Opinions"=ST83Q04,
+  "ST84Q01: Vignette Classroom Management - Students Frequently Interrupt/Teacher Arrives Early"=ST84Q01,
+  "ST84Q02: Vignette Classroom Management - Students Are Calm/Teacher Arrives on Time"=ST84Q02,
+  "ST84Q03: Vignette Classroom Management - Students Frequently Interrupt/Teacher Arrives Late"=ST84Q03,
+  "ST85Q01: Classroom Management - Students Listen"=ST85Q01,
+  "ST85Q02: Classroom Management - Teacher Keeps Class Orderly"=ST85Q02,
+  "ST85Q03: Classroom Management - Teacher Starts On Time"=ST85Q03,
+  "ST85Q04: Classroom Management - Wait Long to <Quiet Down>"=ST85Q04,
+  "ST86Q01: Student-Teacher Relation - Get Along with Teachers"=ST86Q01,
+  "ST86Q02: Student-Teacher Relation - Teachers Are Interested"=ST86Q02,
+  "ST86Q03: Student-Teacher Relation - Teachers Listen to Students"=ST86Q03,
+  "ST86Q04: Student-Teacher Relation - Teachers Help Students"=ST86Q04,
+  "ST86Q05: Student-Teacher Relation - Teachers Treat Students Fair"=ST86Q05,
+  "ST87Q01: Sense of Belonging - Feel Like Outsider"=ST87Q01,
+  "ST87Q02: Sense of Belonging - Make Friends Easily"=ST87Q02,
+  "ST87Q03: Sense of Belonging - Belong at School"=ST87Q03,
+  "ST87Q04: Sense of Belonging - Feel Awkward at School"=ST87Q04,
+  "ST87Q05: Sense of Belonging - Liked by Other Students"=ST87Q05,
+  "ST87Q06: Sense of Belonging - Feel Lonely at School"=ST87Q06,
+  "ST87Q07: Sense of Belonging - Feel Happy at School"=ST87Q07,
+  "ST87Q08: Sense of Belonging - Things Are Ideal at School"=ST87Q08,
+  "ST87Q09: Sense of Belonging - Satisfied at School"=ST87Q09,
+  "ST88Q01: Attitude towards School - Does Little to Prepare Me for Life"=ST88Q01,
+  "ST88Q02: Attitude towards School - Waste of Time"=ST88Q02,
+  "ST88Q03: Attitude towards School - Gave Me Confidence"=ST88Q03,
+  "ST88Q04: Attitude towards School - Useful for Job"=ST88Q04,
+  "ST89Q02: Attitude toward School - Helps to Get a Job"=ST89Q02,
+  "ST89Q03: Attitude toward School - Prepare for College"=ST89Q03,
+  "ST89Q04: Attitude toward School - Enjoy Good Grades"=ST89Q04,
+  "ST89Q05: Attitude toward School - Trying Hard is Important"=ST89Q05,
+  "ST91Q01: Perceived Control - Can Succeed with Enough Effort"=ST91Q01,
+  "ST91Q02: Perceived Control - My Choice Whether I Will Be Good"=ST91Q02,
+  "ST91Q03: Perceived Control - Problems Prevent from Putting Effort into School"=ST91Q03,
+  "ST91Q04: Perceived Control - Different Teachers Would Make Me Try Harder"=ST91Q04,
+  "ST91Q05: Perceived Control - Could Perform Well if I Wanted"=ST91Q05,
+  "ST91Q06: Perceived Control - Perform Poor Regardless"=ST91Q06,
+  "ST93Q01: Perseverance - Give up easily"=ST93Q01,
+  "ST93Q03: Perseverance - Put off difficult problems"=ST93Q03,
+  "ST93Q04: Perseverance - Remain interested"=ST93Q04,
+  "ST93Q06: Perseverance - Continue to perfection"=ST93Q06,
+  "ST93Q07: Perseverance - Exceed expectations"=ST93Q07,
+  "ST94Q05: Openness for Problem Solving - Can Handle a Lot of Information"=ST94Q05,
+  "ST94Q06: Openness for Problem Solving - Quick to Understand"=ST94Q06,
+  "ST94Q09: Openness for Problem Solving - Seek Explanations"=ST94Q09,
+  "ST94Q10: Openness for Problem Solving - Can Link Facts"=ST94Q10,
+  "ST94Q14: Openness for Problem Solving - Like to Solve Complex Problems"=ST94Q14,
+  "ST96Q01: Problem Text Message - Press every button"=ST96Q01,
+  "ST96Q02: Problem Text Message - Trace steps"=ST96Q02,
+  "ST96Q03: Problem Text Message - Manual"=ST96Q03,
+  "ST96Q05: Problem Text Message - Ask a friend"=ST96Q05,
+  "ST101Q01: Problem Route Selection - Read brochure"=ST101Q01,
+  "ST101Q02: Problem Route Selection - Study map"=ST101Q02,
+  "ST101Q03: Problem Route Selection - Leave it to brother"=ST101Q03,
+  "ST101Q05: Problem Route Selection - Just drive"=ST101Q05,
+  "ST104Q01: Problem Ticket Machine - Similarities"=ST104Q01,
+  "ST104Q04: Problem Ticket Machine - Try buttons"=ST104Q04,
+  "ST104Q05: Problem Ticket Machine - Ask for help"=ST104Q05,
+  "ST104Q06: Problem Ticket Machine - Find ticket office"=ST104Q06,
+  "IC01Q01: At Home - Desktop Computer"=IC01Q01,
+  "IC01Q02: At Home - Portable laptop"=IC01Q02,
+  "IC01Q03: At Home - Tablet computer"=IC01Q03,
+  "IC01Q04: At Home - Internet connection"=IC01Q04,
+  "IC01Q05: At Home - Video games console"=IC01Q05,
+  "IC01Q06: At Home - Cell phone w/o Internet"=IC01Q06,
+  "IC01Q07: At Home - Cell phone with Internet"=IC01Q07,
+  "IC01Q08: At Home - Mp3/Mp4 player"=IC01Q08,
+  "IC01Q09: At Home - Printer"=IC01Q09,
+  "IC01Q10: At Home - USB (memory) stick"=IC01Q10,
+  "IC01Q11: At Home - Ebook reader"=IC01Q11,
+  "IC02Q01: At school - Desktop Computer"=IC02Q01,
+  "IC02Q02: At school - Portable laptop"=IC02Q02,
+  "IC02Q03: At school - Tablet computer"=IC02Q03,
+  "IC02Q04: At school - Internet connection"=IC02Q04,
+  "IC02Q05: At school - Printer"=IC02Q05,
+  "IC02Q06: At school - USB (memory) stick"=IC02Q06,
+  "IC02Q07: At school - Ebook reader"=IC02Q07,
+  "IC03Q01: First use of computers"=IC03Q01,
+  "IC04Q01: First access to Internet"=IC04Q01,
+  "IC05Q01: Internet at School"=IC05Q01,
+  "IC06Q01: Internet out-of-school - Weekday"=IC06Q01,
+  "IC07Q01: Internet out-of-school - Weekend"=IC07Q01,
+  "IC08Q01: Out-of-school 8 - One player games."=IC08Q01,
+  "IC08Q02: Out-of-school 8 - Collabourative games."=IC08Q02,
+  "IC08Q03: Out-of-school 8 - Use email"=IC08Q03,
+  "IC08Q04: Out-of-school 8 - Chat on line"=IC08Q04,
+  "IC08Q05: Out-of-school 8 - Social networks"=IC08Q05,
+  "IC08Q06: Out-of-school 8 - Browse the Internet for fun"=IC08Q06,
+  "IC08Q07: Out-of-school 8 - Read news"=IC08Q07,
+  "IC08Q08: Out-of-school 8 - Obtain practical information from the Internet"=IC08Q08,
+  "IC08Q09: Out-of-school 8 - Download music"=IC08Q09,
+  "IC08Q11: Out-of-school 8 - Upload content"=IC08Q11,
+  "IC09Q01: Out-of-school 9 - Internet for school"=IC09Q01,
+  "IC09Q02: Out-of-school 9 - Email students"=IC09Q02,
+  "IC09Q03: Out-of-school 9 - Email teachers"=IC09Q03,
+  "IC09Q04: Out-of-school 9 - Download from School"=IC09Q04,
+  "IC09Q05: Out-of-school 9 - Announcements"=IC09Q05,
+  "IC09Q06: Out-of-school 9 - Homework"=IC09Q06,
+  "IC09Q07: Out-of-school 9 - Share school material"=IC09Q07,
+  "IC10Q01: At School - Chat on line"=IC10Q01,
+  "IC10Q02: At School - Email"=IC10Q02,
+  "IC10Q03: At School - Browse for schoolwork"=IC10Q03,
+  "IC10Q04: At School - Download from website"=IC10Q04,
+  "IC10Q05: At School - Post on website"=IC10Q05,
+  "IC10Q06: At School - Simulations"=IC10Q06,
+  "IC10Q07: At School - Practice and drilling"=IC10Q07,
+  "IC10Q08: At School - Homework"=IC10Q08,
+  "IC10Q09: At School - Group work"=IC10Q09,
+  "IC11Q01: Maths lessons - Draw graph"=IC11Q01,
+  "IC11Q02: Maths lessons - Calculation with numbers"=IC11Q02,
+  "IC11Q03: Maths lessons - Geometric figures"=IC11Q03,
+  "IC11Q04: Maths lessons - Spreadsheet"=IC11Q04,
+  "IC11Q05: Maths lessons - Algebra"=IC11Q05,
+  "IC11Q06: Maths lessons - Histograms"=IC11Q06,
+  "IC11Q07: Maths lessons - Change in graphs"=IC11Q07,
+  "IC22Q01: Attitudes - Useful for schoolwork"=IC22Q01,
+  "IC22Q02: Attitudes - Homework more fun"=IC22Q02,
+  "IC22Q04: Attitudes - Source of information"=IC22Q04,
+  "IC22Q06: Attitudes - Troublesome"=IC22Q06,
+  "IC22Q07: Attitudes - Not suitable for schoolwork"=IC22Q07,
+  "IC22Q08: Attitudes - Too unreliable"=IC22Q08,
+  "EC01Q01: Miss 2 months of <ISCED 1>"=EC01Q01,
+  "EC02Q01: Miss 2 months of <ISCED 2>"=EC02Q01,
+  "EC03Q01: Future Orientation - Internship"=EC03Q01,
+  "EC03Q02: Future Orientation - Work-site visits"=EC03Q02,
+  "EC03Q03: Future Orientation - Job fair"=EC03Q03,
+  "EC03Q04: Future Orientation - Career advisor at school"=EC03Q04,
+  "EC03Q05: Future Orientation - Career advisor outside school"=EC03Q05,
+  "EC03Q06: Future Orientation - Questionnaire"=EC03Q06,
+  "EC03Q07: Future Orientation - Internet search"=EC03Q07,
+  "EC03Q08: Future Orientation - Tour <ISCED 3-5> institution"=EC03Q08,
+  "EC03Q09: Future Orientation - web search <ISCED 3-5> prog"=EC03Q09,
+  "EC03Q10: Future Orientation - <country specific item>"=EC03Q10,
+  "EC04Q01A: Acquired skills - Find job info - Yes, at school"=EC04Q01A,
+  "EC04Q01B: Acquired skills - Find job info - Yes, out of school"=EC04Q01B,
+  "EC04Q01C: Acquired skills - Find job info - No, never"=EC04Q01C,
+  "EC04Q02A: Acquired skills - Search for job - Yes, at school"=EC04Q02A,
+  "EC04Q02B: Acquired skills - Search for job - Yes, out of school"=EC04Q02B,
+  "EC04Q02C: Acquired skills - Search for job - No, never"=EC04Q02C,
+  "EC04Q03A: Acquired skills - Write resume - Yes, at school"=EC04Q03A,
+  "EC04Q03B: Acquired skills - Write resume - Yes, out of school"=EC04Q03B,
+  "EC04Q03C: Acquired skills - Write resume - No, never"=EC04Q03C,
+  "EC04Q04A: Acquired skills - Job interview - Yes, at school"=EC04Q04A,
+  "EC04Q04B: Acquired skills - Job interview - Yes, out of school"=EC04Q04B,
+  "EC04Q04C: Acquired skills - Job interview - No, never"=EC04Q04C,
+  "EC04Q05A: Acquired skills - ISCED 3-5 programs - Yes, at school"=EC04Q05A,
+  "EC04Q05B: Acquired skills - ISCED 3-5 programs - Yes, out of school"=EC04Q05B,
+  "EC04Q05C: Acquired skills - ISCED 3-5 programs - No, never"=EC04Q05C,
+  "EC04Q06A: Acquired skills - Student financing - Yes, at school"=EC04Q06A,
+  "EC04Q06B: Acquired skills - Student financing - Yes, out of school"=EC04Q06B,
+  "EC04Q06C: Acquired skills - Student financing - No, never"=EC04Q06C,
+  "EC05Q01: First language learned"=EC05Q01,
+  "EC06Q01: Age started learning test language"=EC06Q01,
+  "EC07Q01: Language spoken - Mother"=EC07Q01,
+  "EC07Q02: Language spoken - Father"=EC07Q02,
+  "EC07Q03: Language spoken - Siblings"=EC07Q03,
+  "EC07Q04: Language spoken - Best friend"=EC07Q04,
+  "EC07Q05: Language spoken - Schoolmates"=EC07Q05,
+  "EC08Q01: Activities language - Reading"=EC08Q01,
+  "EC08Q02: Activities language - Watching TV"=EC08Q02,
+  "EC08Q03: Activities language - Internet surfing"=EC08Q03,
+  "EC08Q04: Activities language - Writing emails"=EC08Q04,
+  "EC09Q03: Types of support <test language> - remedial lessons"=EC09Q03,
+  "EC10Q01: Amount of support <test language>"=EC10Q01,
+  "EC11Q02: Attend lessons <heritage language> - focused"=EC11Q02,
+  "EC11Q03: Attend lessons <heritage language> - school subjects"=EC11Q03,
+  "EC12Q01: Instruction in <heritage language>"=EC12Q01,
+  "ST22Q01: Acculturation - Mother Immigrant (Filter)"=ST22Q01,
+  "ST23Q01: Acculturation - Enjoy <Host Culture> Friends"=ST23Q01,
+  "ST23Q02: Acculturation - Enjoy <Heritage Culture> Friends"=ST23Q02,
+  "ST23Q03: Acculturation - Enjoy <Host Culture> Celebrations"=ST23Q03,
+  "ST23Q04: Acculturation - Enjoy <Heritage Culture> Celebrations"=ST23Q04,
+  "ST23Q05: Acculturation - Spend Time with <Host Culture> Friends"=ST23Q05,
+  "ST23Q06: Acculturation - Spend Time with <Heritage Culture> Friends"=ST23Q06,
+  "ST23Q07: Acculturation - Participate in <Host Culture> Celebrations"=ST23Q07,
+  "ST23Q08: Acculturation - Participate in <Heritage Culture> Celebrations"=ST23Q08,
+  "ST24Q01: Acculturation - Perceived Host-Heritage Cultural Differences - Values"=ST24Q01,
+  "ST24Q02: Acculturation - Perceived Host-Heritage Cultural Differences - Mother Treatment"=ST24Q02,
+  "ST24Q03: Acculturation - Perceived Host-Heritage Cultural Differences - Teacher Treatment"=ST24Q03,
+  "CLCUSE1: Calculator Use"=CLCUSE1,
+  "CLCUSE301: Effort-real 1"=CLCUSE301,
+  "CLCUSE302: Effort-real 2"=CLCUSE302,
+  "DEFFORT: Difference in Effort"=DEFFORT,
+  "QUESTID: Student Questionnaire Form"=QUESTID,
+  "BOOKID: Booklet ID"=BOOKID,
+  "EASY: Standard or simplified set of booklets"=EASY,
+  "AGE: Age of student"=AGE,
+  "GRADE: Grade compared to modal grade in country"=GRADE,
+  "PROGN: Unique national study programme code"=PROGN,
+  "ANXMAT: Mathematics Anxiety"=ANXMAT,
+  "ATSCHL: Attitude towards School: Learning Outcomes"=ATSCHL,
+  "ATTLNACT: Attitude towards School: Learning Activities"=ATTLNACT,
+  "BELONG: Sense of Belonging to School"=BELONG,
+  "BFMJ2: Father SQ ISEI"=BFMJ2,
+  "BMMJ1: Mother SQ ISEI"=BMMJ1,
+  "CLSMAN: Mathematics Teacher's Classroom Management"=CLSMAN,
+  "COBN_F: Country of Birth National Categories - Father"=COBN_F,
+  "COBN_M: Country of Birth National Categories - Mother"=COBN_M,
+  "COBN_S: Country of Birth National Categories - Self"=COBN_S,
+  "COGACT: Cognitive Activation in Mathematics Lessons"=COGACT,
+  "CULTDIST: Cultural Distance between Host and Heritage Culture"=CULTDIST,
+  "CULTPOS: Cultural Possessions"=CULTPOS,
+  "DISCLIMA: Disciplinary Climate"=DISCLIMA,
+  "ENTUSE: ICT Entertainment Use"=ENTUSE,
+  "ESCS: Index of economic, social and cultural status"=ESCS,
+  "EXAPPLM: Experience with Applied Mathematics Tasks at School"=EXAPPLM,
+  "EXPUREM: Experience with Pure Mathematics Tasks at School"=EXPUREM,
+  "FAILMAT: Attributions to Failure in Mathematics"=FAILMAT,
+  "FAMCON: Familiarity with Mathematical Concepts"=FAMCON,
+  "FAMCONC: Familiarity with Mathematical Concepts (Signal Detection Adjusted)"=FAMCONC,
+  "FAMSTRUC: Family Structure"=FAMSTRUC,
+  "FISCED: Educational level of father (ISCED)"=FISCED,
+  "HEDRES: Home educational resources"=HEDRES,
+  "HERITCUL: Acculturation: Heritage Culture Oriented Strategies"=HERITCUL,
+  "HISCED: Highest educational level of parents"=HISCED,
+  "HISEI: Highest parental occupational status"=HISEI,
+  "HOMEPOS: Home Possessions"=HOMEPOS,
+  "HOMSCH: ICT Use at Home for School-related Tasks"=HOMSCH,
+  "HOSTCUL: Acculturation: Host Culture Oriented Strategies"=HOSTCUL,
+  "ICTATTNEG: Attitudes Towards Computers: Limitations of the Computer as a Tool for School Learning"=ICTATTNEG,
+  "ICTATTPOS: Attitudes Towards Computers: Computer as a Tool for School Learning"=ICTATTPOS,
+  "ICTHOME: ICT Availability at Home"=ICTHOME,
+  "ICTRES: ICT resources"=ICTRES,
+  "ICTSCH: ICT Availability at School"=ICTSCH,
+  "IMMIG: Immigration status"=IMMIG,
+  "INFOCAR: Information about Careers"=INFOCAR,
+  "INFOJOB1: Information about the Labour Market provided by the School"=INFOJOB1,
+  "INFOJOB2: Information about the Labour Market provided outside of School"=INFOJOB2,
+  "INSTMOT: Instrumental Motivation for Mathematics"=INSTMOT,
+  "INTMAT: Mathematics Interest"=INTMAT,
+  "ISCEDD: ISCED designation"=ISCEDD,
+  "ISCEDL: ISCED level"=ISCEDL,
+  "ISCEDO: ISCED orientation"=ISCEDO,
+  "LANGCOMM: Preference for Heritage Language in Conversations with Family and Friends"=LANGCOMM,
+  "LANGN: Language at home (3-digit code)"=LANGN,
+  "LANGRPPD: Preference for Heritage Language in Language Reception and Production"=LANGRPPD,
+  "LMINS: Learning time (minutes per week) - <test language>"=LMINS,
+  "MATBEH: Mathematics Behaviour"=MATBEH,
+  "MATHEFF: Mathematics Self-Efficacy"=MATHEFF,
+  "MATINTFC: Mathematics Intentions"=MATINTFC,
+  "MATWKETH: Mathematics Work Ethic"=MATWKETH,
+  "MISCED: Educational level of mother (ISCED)"=MISCED,
+  "MMINS: Learning time (minutes per week) - <Mathematics>"=MMINS,
+  "MTSUP: Mathematics Teacher's Support"=MTSUP,
+  "OCOD1: ISCO-08 Occupation code - Mother"=OCOD1,
+  "OCOD2: ISCO-08 Occupation code - Father"=OCOD2,
+  "OPENPS: Openness for Problem Solving"=OPENPS,
+  "OUTHOURS: Out-of-School Study Time"=OUTHOURS,
+  "PARED: Highest parental education in years"=PARED,
+  "PERSEV: Perseverance"=PERSEV,
+  "REPEAT: Grade Repetition"=REPEAT,
+  "SCMAT: Mathematics Self-Concept"=SCMAT,
+  "SMINS: Learning time (minutes per week) - <Science>"=SMINS,
+  "STUDREL: Teacher Student Relations"=STUDREL,
+  "SUBNORM: Subjective Norms in Mathematics"=SUBNORM,
+  "TCHBEHFA: Teacher Behaviour: Formative Assessment"=TCHBEHFA,
+  "TCHBEHSO: Teacher Behaviour: Student Orientation"=TCHBEHSO,
+  "TCHBEHTD: Teacher Behaviour: Teacher-directed Instruction"=TCHBEHTD,
+  "TEACHSUP: Teacher Support"=TEACHSUP,
+  "TESTLANG: Language of the test"=TESTLANG,
+  "TIMEINT: Time of computer use (mins)"=TIMEINT,
+  "USEMATH: Use of ICT in Mathematic Lessons"=USEMATH,
+  "USESCH: Use of ICT at School"=USESCH,
+  "WEALTH: Wealth"=WEALTH,
+  "ANCATSCHL: Attitude towards School: Learning Outcomes (Anchored)"=ANCATSCHL,
+  "ANCATTLNACT Attitude towards School: Learning Activities (Anchored)"=ANCATTLNACT,
+  "ANCBELONG: Sense of Belonging to School (Anchored)"=ANCBELONG,
+  "ANCCLSMAN: Mathematics Teacher's Classroom Management (Anchored)"=ANCCLSMAN,
+  "ANCCOGACT: Cognitive Activation in Mathematics Lessons (Anchored)"=ANCCOGACT,
+  "ANCINSTMOT: Instrumental Motivation for Mathematics (Anchored)"=ANCINSTMOT,
+  "ANCINTMAT: Mathematics Interest (Anchored)"=ANCINTMAT,
+  "ANCMATWKETH Mathematics Work Ethic (Anchored)"=ANCMATWKETH,
+  "ANCMTSUP: Mathematics Teacher's Support (Anchored)"=ANCMTSUP,
+  "ANCSCMAT: Mathematics Self-Concept (Anchored)"=ANCSCMAT,
+  "ANCSTUDREL: Teacher Student Relations (Anchored)"=ANCSTUDREL,
+  "ANCSUBNORM: Subjective Norms in Mathematics (Anchored)"=ANCSUBNORM,
+  "PV1MATH: Plausible value 1 in mathematics"=PV1MATH,
+  "PV2MATH: Plausible value 2 in mathematics"=PV2MATH,
+  "PV3MATH: Plausible value 3 in mathematics"=PV3MATH,
+  "PV4MATH: Plausible value 4 in mathematics"=PV4MATH,
+  "PV5MATH: Plausible value 5 in mathematics"=PV5MATH,
+  "PV1MACC: Plausible value 1 in content subscale of math - Change and Relationships"=PV1MACC,
+  "PV2MACC: Plausible value 2 in content subscale of math - Change and Relationships"=PV2MACC,
+  "PV3MACC: Plausible value 3 in content subscale of math - Change and Relationships"=PV3MACC,
+  "PV4MACC: Plausible value 4 in content subscale of math - Change and Relationships"=PV4MACC,
+  "PV5MACC: Plausible value 5 in content subscale of math - Change and Relationships"=PV5MACC,
+  "PV1MACQ: Plausible value 1 in content subscale of math - Quantity"=PV1MACQ,
+  "PV2MACQ: Plausible value 2 in content subscale of math - Quantity"=PV2MACQ,
+  "PV3MACQ: Plausible value 3 in content subscale of math - Quantity"=PV3MACQ,
+  "PV4MACQ: Plausible value 4 in content subscale of math - Quantity"=PV4MACQ,
+  "PV5MACQ: Plausible value 5 in content subscale of math - Quantity"=PV5MACQ,
+  "PV1MACS: Plausible value 1 in content subscale of math - Space and Shape"=PV1MACS,
+  "PV2MACS: Plausible value 2 in content subscale of math - Space and Shape"=PV2MACS,
+  "PV3MACS: Plausible value 3 in content subscale of math - Space and Shape"=PV3MACS,
+  "PV4MACS: Plausible value 4 in content subscale of math - Space and Shape"=PV4MACS,
+  "PV5MACS: Plausible value 5 in content subscale of math - Space and Shape"=PV5MACS,
+  "PV1MACU: Plausible value 1 in content subscale of math - Uncertainty and Data"=PV1MACU,
+  "PV2MACU: Plausible value 2 in content subscale of math - Uncertainty and Data"=PV2MACU,
+  "PV3MACU: Plausible value 3 in content subscale of math - Uncertainty and Data"=PV3MACU,
+  "PV4MACU: Plausible value 4 in content subscale of math - Uncertainty and Data"=PV4MACU,
+  "PV5MACU: Plausible value 5 in content subscale of math - Uncertainty and Data"=PV5MACU,
+  "PV1MAPE: Plausible value 1 in process subscale of math - Employ"=PV1MAPE,
+  "PV2MAPE: Plausible value 2 in process subscale of math - Employ"=PV2MAPE,
+  "PV3MAPE: Plausible value 3 in process subscale of math - Employ"=PV3MAPE,
+  "PV4MAPE: Plausible value 4 in process subscale of math - Employ"=PV4MAPE,
+  "PV5MAPE: Plausible value 5 in process subscale of math - Employ"=PV5MAPE,
+  "PV1MAPF: Plausible value 1 in process subscale of math - Formulate"=PV1MAPF,
+  "PV2MAPF: Plausible value 2 in process subscale of math - Formulate"=PV2MAPF,
+  "PV3MAPF: Plausible value 3 in process subscale of math - Formulate"=PV3MAPF,
+  "PV4MAPF: Plausible value 4 in process subscale of math - Formulate"=PV4MAPF,
+  "PV5MAPF: Plausible value 5 in process subscale of math - Formulate"=PV5MAPF,
+  "PV1MAPI: Plausible value 1 in process subscale of math - Interpret"=PV1MAPI,
+  "PV2MAPI: Plausible value 2 in process subscale of math - Interpret"=PV2MAPI,
+  "PV3MAPI: Plausible value 3 in process subscale of math - Interpret"=PV3MAPI,
+  "PV4MAPI: Plausible value 4 in process subscale of math - Interpret"=PV4MAPI,
+  "PV5MAPI: Plausible value 5 in process subscale of math - Interpret"=PV5MAPI,
+  "PV1READ: Plausible value 1 in reading"=PV1READ,
+  "PV2READ: Plausible value 2 in reading"=PV2READ,
+  "PV3READ: Plausible value 3 in reading"=PV3READ,
+  "PV4READ: Plausible value 4 in reading"=PV4READ,
+  "PV5READ: Plausible value 5 in reading"=PV5READ,
+  "PV1SCIE: Plausible value 1 in science"=PV1SCIE,
+  "PV2SCIE: Plausible value 2 in science"=PV2SCIE,
+  "PV3SCIE: Plausible value 3 in science"=PV3SCIE,
+  "PV4SCIE: Plausible value 4 in science"=PV4SCIE,
+  "PV5SCIE: Plausible value 5 in science"=PV5SCIE,
+  "W_FSTUWT: FINAL STUDENT WEIGHT"=W_FSTUWT,
+  "W_FSTR1: FINAL STUDENT REPLICATE BRR-FAY WEIGHT1"=W_FSTR1,
+  "W_FSTR2: FINAL STUDENT REPLICATE BRR-FAY WEIGHT2"=W_FSTR2,
+  "W_FSTR3: FINAL STUDENT REPLICATE BRR-FAY WEIGHT3"=W_FSTR3,
+  "W_FSTR4: FINAL STUDENT REPLICATE BRR-FAY WEIGHT4"=W_FSTR4,
+  "W_FSTR5: FINAL STUDENT REPLICATE BRR-FAY WEIGHT5"=W_FSTR5,
+  "W_FSTR6: FINAL STUDENT REPLICATE BRR-FAY WEIGHT6"=W_FSTR6,
+  "W_FSTR7: FINAL STUDENT REPLICATE BRR-FAY WEIGHT7"=W_FSTR7,
+  "W_FSTR8: FINAL STUDENT REPLICATE BRR-FAY WEIGHT8"=W_FSTR8,
+  "W_FSTR9: FINAL STUDENT REPLICATE BRR-FAY WEIGHT9"=W_FSTR9,
+  "W_FSTR10: FINAL STUDENT REPLICATE BRR-FAY WEIGHT10"=W_FSTR10,
+  "W_FSTR11: FINAL STUDENT REPLICATE BRR-FAY WEIGHT11"=W_FSTR11,
+  "W_FSTR12: FINAL STUDENT REPLICATE BRR-FAY WEIGHT12"=W_FSTR12,
+  "W_FSTR13: FINAL STUDENT REPLICATE BRR-FAY WEIGHT13"=W_FSTR13,
+  "W_FSTR14: FINAL STUDENT REPLICATE BRR-FAY WEIGHT14"=W_FSTR14,
+  "W_FSTR15: FINAL STUDENT REPLICATE BRR-FAY WEIGHT15"=W_FSTR15,
+  "W_FSTR16: FINAL STUDENT REPLICATE BRR-FAY WEIGHT16"=W_FSTR16,
+  "W_FSTR17: FINAL STUDENT REPLICATE BRR-FAY WEIGHT17"=W_FSTR17,
+  "W_FSTR18: FINAL STUDENT REPLICATE BRR-FAY WEIGHT18"=W_FSTR18,
+  "W_FSTR19: FINAL STUDENT REPLICATE BRR-FAY WEIGHT19"=W_FSTR19,
+  "W_FSTR20: FINAL STUDENT REPLICATE BRR-FAY WEIGHT20"=W_FSTR20,
+  "W_FSTR21: FINAL STUDENT REPLICATE BRR-FAY WEIGHT21"=W_FSTR21,
+  "W_FSTR22: FINAL STUDENT REPLICATE BRR-FAY WEIGHT22"=W_FSTR22,
+  "W_FSTR23: FINAL STUDENT REPLICATE BRR-FAY WEIGHT23"=W_FSTR23,
+  "W_FSTR24: FINAL STUDENT REPLICATE BRR-FAY WEIGHT24"=W_FSTR24,
+  "W_FSTR25: FINAL STUDENT REPLICATE BRR-FAY WEIGHT25"=W_FSTR25,
+  "W_FSTR26: FINAL STUDENT REPLICATE BRR-FAY WEIGHT26"=W_FSTR26,
+  "W_FSTR27: FINAL STUDENT REPLICATE BRR-FAY WEIGHT27"=W_FSTR27,
+  "W_FSTR28: FINAL STUDENT REPLICATE BRR-FAY WEIGHT28"=W_FSTR28,
+  "W_FSTR29: FINAL STUDENT REPLICATE BRR-FAY WEIGHT29"=W_FSTR29,
+  "W_FSTR30: FINAL STUDENT REPLICATE BRR-FAY WEIGHT30"=W_FSTR30,
+  "W_FSTR31: FINAL STUDENT REPLICATE BRR-FAY WEIGHT31"=W_FSTR31,
+  "W_FSTR32: FINAL STUDENT REPLICATE BRR-FAY WEIGHT32"=W_FSTR32,
+  "W_FSTR33: FINAL STUDENT REPLICATE BRR-FAY WEIGHT33"=W_FSTR33,
+  "W_FSTR34: FINAL STUDENT REPLICATE BRR-FAY WEIGHT34"=W_FSTR34,
+  "W_FSTR35: FINAL STUDENT REPLICATE BRR-FAY WEIGHT35"=W_FSTR35,
+  "W_FSTR36: FINAL STUDENT REPLICATE BRR-FAY WEIGHT36"=W_FSTR36,
+  "W_FSTR37: FINAL STUDENT REPLICATE BRR-FAY WEIGHT37"=W_FSTR37,
+  "W_FSTR38: FINAL STUDENT REPLICATE BRR-FAY WEIGHT38"=W_FSTR38,
+  "W_FSTR39: FINAL STUDENT REPLICATE BRR-FAY WEIGHT39"=W_FSTR39,
+  "W_FSTR40: FINAL STUDENT REPLICATE BRR-FAY WEIGHT40"=W_FSTR40,
+  "W_FSTR41: FINAL STUDENT REPLICATE BRR-FAY WEIGHT41"=W_FSTR41,
+  "W_FSTR42: FINAL STUDENT REPLICATE BRR-FAY WEIGHT42"=W_FSTR42,
+  "W_FSTR43: FINAL STUDENT REPLICATE BRR-FAY WEIGHT43"=W_FSTR43,
+  "W_FSTR44: FINAL STUDENT REPLICATE BRR-FAY WEIGHT44"=W_FSTR44,
+  "W_FSTR45: FINAL STUDENT REPLICATE BRR-FAY WEIGHT45"=W_FSTR45,
+  "W_FSTR46: FINAL STUDENT REPLICATE BRR-FAY WEIGHT46"=W_FSTR46,
+  "W_FSTR47: FINAL STUDENT REPLICATE BRR-FAY WEIGHT47"=W_FSTR47,
+  "W_FSTR48: FINAL STUDENT REPLICATE BRR-FAY WEIGHT48"=W_FSTR48,
+  "W_FSTR49: FINAL STUDENT REPLICATE BRR-FAY WEIGHT49"=W_FSTR49,
+  "W_FSTR50: FINAL STUDENT REPLICATE BRR-FAY WEIGHT50"=W_FSTR50,
+  "W_FSTR51: FINAL STUDENT REPLICATE BRR-FAY WEIGHT51"=W_FSTR51,
+  "W_FSTR52: FINAL STUDENT REPLICATE BRR-FAY WEIGHT52"=W_FSTR52,
+  "W_FSTR53: FINAL STUDENT REPLICATE BRR-FAY WEIGHT53"=W_FSTR53,
+  "W_FSTR54: FINAL STUDENT REPLICATE BRR-FAY WEIGHT54"=W_FSTR54,
+  "W_FSTR55: FINAL STUDENT REPLICATE BRR-FAY WEIGHT55"=W_FSTR55,
+  "W_FSTR56: FINAL STUDENT REPLICATE BRR-FAY WEIGHT56"=W_FSTR56,
+  "W_FSTR57: FINAL STUDENT REPLICATE BRR-FAY WEIGHT57"=W_FSTR57,
+  "W_FSTR58: FINAL STUDENT REPLICATE BRR-FAY WEIGHT58"=W_FSTR58,
+  "W_FSTR59: FINAL STUDENT REPLICATE BRR-FAY WEIGHT59"=W_FSTR59,
+  "W_FSTR60: FINAL STUDENT REPLICATE BRR-FAY WEIGHT60"=W_FSTR60,
+  "W_FSTR61: FINAL STUDENT REPLICATE BRR-FAY WEIGHT61"=W_FSTR61,
+  "W_FSTR62: FINAL STUDENT REPLICATE BRR-FAY WEIGHT62"=W_FSTR62,
+  "W_FSTR63: FINAL STUDENT REPLICATE BRR-FAY WEIGHT63"=W_FSTR63,
+  "W_FSTR64: FINAL STUDENT REPLICATE BRR-FAY WEIGHT64"=W_FSTR64,
+  "W_FSTR65: FINAL STUDENT REPLICATE BRR-FAY WEIGHT65"=W_FSTR65,
+  "W_FSTR66: FINAL STUDENT REPLICATE BRR-FAY WEIGHT66"=W_FSTR66,
+  "W_FSTR67: FINAL STUDENT REPLICATE BRR-FAY WEIGHT67"=W_FSTR67,
+  "W_FSTR68: FINAL STUDENT REPLICATE BRR-FAY WEIGHT68"=W_FSTR68,
+  "W_FSTR69: FINAL STUDENT REPLICATE BRR-FAY WEIGHT69"=W_FSTR69,
+  "W_FSTR70: FINAL STUDENT REPLICATE BRR-FAY WEIGHT70"=W_FSTR70,
+  "W_FSTR71: FINAL STUDENT REPLICATE BRR-FAY WEIGHT71"=W_FSTR71,
+  "W_FSTR72: FINAL STUDENT REPLICATE BRR-FAY WEIGHT72"=W_FSTR72,
+  "W_FSTR73: FINAL STUDENT REPLICATE BRR-FAY WEIGHT73"=W_FSTR73,
+  "W_FSTR74: FINAL STUDENT REPLICATE BRR-FAY WEIGHT74"=W_FSTR74,
+  "W_FSTR75: FINAL STUDENT REPLICATE BRR-FAY WEIGHT75"=W_FSTR75,
+  "W_FSTR76: FINAL STUDENT REPLICATE BRR-FAY WEIGHT76"=W_FSTR76,
+  "W_FSTR77: FINAL STUDENT REPLICATE BRR-FAY WEIGHT77"=W_FSTR77,
+  "W_FSTR78: FINAL STUDENT REPLICATE BRR-FAY WEIGHT78"=W_FSTR78,
+  "W_FSTR79: FINAL STUDENT REPLICATE BRR-FAY WEIGHT79"=W_FSTR79,
+  "W_FSTR80: FINAL STUDENT REPLICATE BRR-FAY WEIGHT80"=W_FSTR80,
+  "WVARSTRR: RANDOMIZED FINAL VARIANCE STRATUM (1-80)"=WVARSTRR,
+  "VAR_UNIT: RANDOMLY ASSIGNED VARIANCE UNIT"=VAR_UNIT,
+  "SENWGT_STU: Senate weight - sum of weight within the country is 1000"=SENWGT_STU)
 ```
 
-#### Truancy
+#### Regional data
 
-There are multiple columns reflecting truancy; there should be one column for the level in question, and one for the response.
+```{r rename composite columns, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+country_data <- country_data %>%
+  rename("CNT: Country code 3-character"=CNT)
 
-```{r collapse truancy, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
-pisa <- pisa %>%
-  gather(key = "truancy_level", value = "truancy_response", ST08Q01:ST115Q01) %>%
-  mutate(truancy_level = gsub("ST08Q01", "Late for School", truancy_level)) %>%
-  mutate(truancy_level = gsub("ST09Q01", "Skip whole school day", truancy_level)) %>%
-  mutate(truancy_level = gsub("ST115Q01", "Skip classes within school day", truancy_level))
+subregion_data <- subregion_data %>%
+  rename("STRATUM: Stratum ID 7-character (cnt + region ID + original stratum ID)"=STRATUM)
 ```
 
-#### At home
+### Checking levels
 
-```{r collapse at home, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
-pisa <- pisa %>%
-  gather(key = "family_home", value = "family_home_response", ST11Q01:ST11Q06) %>%
-  mutate(family_home = gsub("ST11Q01", "Mother", family_home)) %>%
-  mutate(family_home = gsub("ST11Q02", "Father", family_home)) %>%
-  mutate(family_home = gsub("ST11Q03", "Brothers", family_home)) %>%
-  mutate(family_home = gsub("ST11Q04", "Sisters", family_home)) %>%
-  mutate(family_home = gsub("ST11Q05", "Grandparents", family_home)) %>%
-  mutate(family_home = gsub("ST11Q06", "Others", family_home))
+Here I check that the values in all levels look sane.
+
+```{r check levels, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+# summary(pisa[,1:100])
+# summary(pisa[,101:200])
+# summary(pisa[,201:300])
+# summary(pisa[,301:400])
+# summary(pisa[,401:500])
+# summary(pisa[,501:600])
+# summary(pisa[,601:628])
 ```
 
-#### Parent education
+### Removing unneeded columns
 
-There are multiple columns all reflecting the highest education level of each parent - I will collapse this to two.
+The row index and date the database was created are not needed.
 
-```{r collapse parent education, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
-pisa$mother_highest_ISCED_level <- ifelse(pisa$ST14Q01=="Yes","6",ifelse(pisa$ST14Q03=="Yes","5B",ifelse(pisa$ST14Q02=="Yes","5A",ifelse(pisa$ST14Q04=="Yes","4",ifelse(pisa$ST13Q01=="<ISCED level 3B, 3C>","3B/C",ifelse(pisa$ST13Q01=="<ISCED level 3A>","3A",ifelse(pisa$ST13Q01=="<ISCED level 2>","2",ifelse(ifelse(pisa$ST13Q01=="<ISCED level 1>","1",ifelse(ifelse(pisa$ST13Q01=="She did not complete <ISCED level 1>","None",NA)))))))))))
-
-pisa$father_highest_ISCED_level <- ifelse(pisa$ST18Q01=="Yes","6",ifelse(pisa$ST18Q03=="Yes","5B",ifelse(pisa$ST18Q02=="Yes","5A",ifelse(pisa$ST18Q04=="Yes","4",ifelse(pisa$ST17Q01=="<ISCED level 3B, 3C>","3B/C",ifelse(pisa$ST17Q01=="<ISCED level 3A>","3A",ifelse(pisa$ST17Q01=="<ISCED level 2>","2",ifelse(ifelse(pisa$ST17Q01=="<ISCED level 1>","1",ifelse(ifelse(pisa$ST17Q01=="He did not complete <ISCED level 1>","None",NA)))))))))))
-
-parent_ed <- c("ST13Q01","ST14Q01","ST14Q02","ST14Q03","ST14Q04","ST17Q01","ST18Q01","ST18Q02","ST18Q03","ST18Q04")
-
-pisa <- select(pisa, -one_of(parent_ed))
+```{r remove columns, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+remove <- c("V1", "VER_STU")
+pisa <- select(pisa, -one_of(remove))
 ```
 
+## Preparing data for plotting
 
-#### Country of birth
+Now that I've created a few preliminary plots, I have a general idea of what I want to look at, and the extent to which various survey measures (of student/teacher engagement, time spent on learning, etc.) predict success at the country and subregion level.
 
-```{r collapse birth country, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
-pisa <- pisa %>%
-  gather(key = "int_country_birth", value = "int_country_birth_response", ST20Q01:ST20Q03) %>%
-  mutate(int_country_birth = gsub("ST20Q01", "Self", int_country_birth)) %>%
-  mutate(int_country_birth = gsub("ST20Q02", "Mother", int_country_birth)) %>%
-  mutate(int_country_birth = gsub("ST20Q03", "Father", int_country_birth))
+As I've found that a measure of wealth inequality (not only average wealth) may be a useful measure, I will use the Gini coefficient (https://en.wikipedia.org/wiki/Gini_coefficient) instead of the standard deviation as an estimate for this measure.
+
+For relative ease of interpretation, since some of the measures (e.g., the wealth calculation) are already opaque, I will both average and scale all quantitative measures I might want to plot.
+
+### Country
+
+```{r country data, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+measures_by_country <- pisa %>%
+  group_by(`CNT: Country code 3-character`) %>%
+  summarize("WEALTH: Wealth - mean (country)" = mean(`WEALTH: Wealth`, na.rm=TRUE), "WEALTH: Wealth - median (country)" = median(`WEALTH: Wealth`, na.rm=TRUE), "WEALTH: Wealth Inequality (country)" = Gini(`WEALTH: Wealth`+10, na.rm=TRUE)*-1, "ESCS: Index of economic, social and cultural status (country)" = mean(`ESCS: Index of economic, social and cultural status`, na.rm=TRUE), "ST57Q01: Out-of-School Study Time - Homework - mean (country)" = mean(`ST57Q01: Out-of-School Study Time - Homework`, na.rm=TRUE), "ST69Q01: Min in <class period> - <test lang> - mean (country)" = mean(`ST69Q01: Min in <class period> - <test lang>`, na.rm=TRUE), "ST69Q02: Min in <class period> - <Maths> - mean (country)" = mean(`ST69Q02: Min in <class period> - <Maths>`, na.rm=TRUE), "ST69Q03: Min in <class period> - <Science> - mean (country)" = mean(`ST69Q03: Min in <class period> - <Science>`, na.rm=TRUE), "IC05Q01: Internet at School - mean (country)" = mean(`IC05Q01: Internet at School`, na.rm=TRUE), "IC06Q01: Internet out-of-school - Weekday - mean (country)" = mean(`IC06Q01: Internet out-of-school - Weekday`, na.rm=TRUE), "IC07Q01: Internet out-of-school - Weekend - mean (country)" = mean(`IC07Q01: Internet out-of-school - Weekend`, na.rm=TRUE), "ATSCHL: Attitude towards School: Learning Outcomes - mean (country)" = mean(`ATSCHL: Attitude towards School: Learning Outcomes`, na.rm=TRUE), "ICTRES: ICT resources - mean (country)" = mean(`ICTRES: ICT resources`, na.rm=TRUE), "INSTMOT: Instrumental Motivation for Mathematics - mean (country)" = mean(`INSTMOT: Instrumental Motivation for Mathematics`, na.rm=TRUE), "INTMAT: Mathematics Interest - mean (country)" = mean(`INTMAT: Mathematics Interest`, na.rm=TRUE), "LMINS: Learning time (minutes per week) - <test language> - mean (country)" = mean(`LMINS: Learning time (minutes per week) - <test language>`, na.rm=TRUE), "MMINS: Learning time (minutes per week) - <Mathematics> - mean (country)" = mean(`MMINS: Learning time (minutes per week) - <Mathematics>`, na.rm=TRUE), "SMINS: Learning time (minutes per week) - <Science> - mean (country)" = mean(`SMINS: Learning time (minutes per week) - <Science>`, na.rm=TRUE), "MATWKETH: Mathematics Work Ethic - mean (country)" = mean(`MATWKETH: Mathematics Work Ethic`, na.rm=TRUE), "PERSEV: Perseverance - mean (country)" = mean(`PERSEV: Perseverance`, na.rm=TRUE), "PARED: Highest parental education in years - mean (country)" = mean(`PARED: Highest parental education in years`, na.rm=TRUE), "OUTHOURS: Out-of-School Study Time - mean (country)" = mean(`OUTHOURS: Out-of-School Study Time`, na.rm=TRUE), "OPENPS: Openness for Problem Solving - mean (country)" = mean(`OPENPS: Openness for Problem Solving`, na.rm=TRUE), "TCHBEHSO: Teacher Behaviour: Student Orientation - mean (country)" = mean(`TCHBEHSO: Teacher Behaviour: Student Orientation`, na.rm=TRUE), "TCHBEHTD: Teacher Behaviour: Teacher-directed Instruction - mean (country)" = mean(`TCHBEHTD: Teacher Behaviour: Teacher-directed Instruction`, na.rm=TRUE), "TEACHSUP: Teacher Support - mean (country)" = mean(`TEACHSUP: Teacher Support`, na.rm=TRUE))
+
+measures_by_country <- left_join(measures_by_country, country_data, by="CNT: Country code 3-character")
+
+for (col in colnames(measures_by_country[,-1])) {
+  measures_by_country[[paste(col,"- scaled")]] <- rescale(measures_by_country[[col]], to=c(-0.5,0.5))
+}
 ```
 
-### Rest
+### Region
 
-`V1` seems to simply be a row index, and should be removed.
+```{r region data, cache=TRUE, message=FALSE, warning=FALSE, cache.lazy=FALSE}
+measures_by_region <- pisa %>%
+  group_by(`CNT: Country code 3-character`,`STRATUM: Stratum ID 7-character (cnt + region ID + original stratum ID)`) %>%
+  summarize("WEALTH: Wealth - mean (region)" = mean(`WEALTH: Wealth`, na.rm=TRUE), "WEALTH: Wealth - median (region)" = median(`WEALTH: Wealth`, na.rm=TRUE), "WEALTH: Wealth Inequality (region)" = Gini(`WEALTH: Wealth`+10, na.rm=TRUE)*-1, "ESCS: Index of economic, social and cultural status (region)" = mean(`ESCS: Index of economic, social and cultural status`, na.rm=TRUE), "ST57Q01: Out-of-School Study Time - Homework - mean (region)" = mean(`ST57Q01: Out-of-School Study Time - Homework`, na.rm=TRUE), "ST69Q01: Min in <class period> - <test lang> - mean (region)" = mean(`ST69Q01: Min in <class period> - <test lang>`, na.rm=TRUE), "ST69Q02: Min in <class period> - <Maths> - mean (region)" = mean(`ST69Q02: Min in <class period> - <Maths>`, na.rm=TRUE), "ST69Q03: Min in <class period> - <Science> - mean (region)" = mean(`ST69Q03: Min in <class period> - <Science>`, na.rm=TRUE), "IC05Q01: Internet at School - mean (region)" = mean(`IC05Q01: Internet at School`, na.rm=TRUE), "IC06Q01: Internet out-of-school - Weekday - mean (region)" = mean(`IC06Q01: Internet out-of-school - Weekday`, na.rm=TRUE), "IC07Q01: Internet out-of-school - Weekend - mean (region)" = mean(`IC07Q01: Internet out-of-school - Weekend`, na.rm=TRUE), "ATSCHL: Attitude towards School: Learning Outcomes - mean (region)" = mean(`ATSCHL: Attitude towards School: Learning Outcomes`, na.rm=TRUE), "ICTRES: ICT resources - mean (region)" = mean(`ICTRES: ICT resources`, na.rm=TRUE), "INSTMOT: Instrumental Motivation for Mathematics - mean (region)" = mean(`INSTMOT: Instrumental Motivation for Mathematics`, na.rm=TRUE), "INTMAT: Mathematics Interest - mean (region)" = mean(`INTMAT: Mathematics Interest`, na.rm=TRUE), "LMINS: Learning time (minutes per week) - <test language> - mean (region)" = mean(`LMINS: Learning time (minutes per week) - <test language>`, na.rm=TRUE), "MMINS: Learning time (minutes per week) - <Mathematics> - mean (region)" = mean(`MMINS: Learning time (minutes per week) - <Mathematics>`, na.rm=TRUE), "SMINS: Learning time (minutes per week) - <Science> - mean (region)" = mean(`SMINS: Learning time (minutes per week) - <Science>`, na.rm=TRUE), "MATWKETH: Mathematics Work Ethic - mean (region)" = mean(`MATWKETH: Mathematics Work Ethic`, na.rm=TRUE), "PERSEV: Perseverance - mean (region)" = mean(`PERSEV: Perseverance`, na.rm=TRUE), "PARED: Highest parental education in years - mean (region)" = mean(`PARED: Highest parental education in years`, na.rm=TRUE), "OUTHOURS: Out-of-School Study Time - mean (region)" = mean(`OUTHOURS: Out-of-School Study Time`, na.rm=TRUE), "OPENPS: Openness for Problem Solving - mean (region)" = mean(`OPENPS: Openness for Problem Solving`, na.rm=TRUE), "TCHBEHSO: Teacher Behaviour: Student Orientation - mean (region)" = mean(`TCHBEHSO: Teacher Behaviour: Student Orientation`, na.rm=TRUE), "TCHBEHTD: Teacher Behaviour: Teacher-directed Instruction - mean (region)" = mean(`TCHBEHTD: Teacher Behaviour: Teacher-directed Instruction`, na.rm=TRUE), "TEACHSUP: Teacher Support - mean (region)" = mean(`TEACHSUP: Teacher Support`, na.rm=TRUE))
 
-`CNT` is a country code - unclear how this differs from `NC`, the "National Centre 6-digit Code".
+measures_by_region <- left_join(measures_by_region, subregion_data, by=c("STRATUM: Stratum ID 7-character (cnt + region ID + original stratum ID)"))
 
-```{r, message=FALSE, warning=FALSE, cache=TRUE, cache.lazy=FALSE}
-# filter(pisa, as.character(CNT) != as.character(NC))[,c("CNT","NC")] %>% distinct()
-
-# pisa[4744,1:7]
-
-filter(pisa, as.character(CNT) != as.character(NC))[,c("CNT","NC")] %>% distinct()
+for (col in colnames(measures_by_region[,-c(1,2)])) {
+  measures_by_region[[paste(col,"- scaled")]] <- rescale(measures_by_region[[col]], to=c(-.5,0.5))
+}
 ```
 
-These appear to be largely redundant, but countries are sometimes described slightly differently, and `CNT` sometimes refers to states within the US (and sometimes to the US as a whole, which is confusing).  In other cases, countries appear to have padding from spaces, which I fix above.
+## Exporting data
 
-Sometimes `CNT` provides a bit more regional detail, and sometimes `NC`.  I'll see if this information is represented elsewhere, and attempt to simplify taking into account how I can use this information in Tableau.
+Save all relevant data (modified PISA dataset and by-country/subregion data) to .csv files in current directory.
 
+```{r export data, message=FALSE, warning=FALSE}
+pisa <- select(pisa, -("PV1MATH: Plausible value 1 in mathematics":"W_FSTR80: FINAL STUDENT REPLICATE BRR-FAY WEIGHT80"))
 
+# fwrite(pisa, "pisa.csv")
+# fwrite(measures_by_country, "country_data.csv")
+# fwrite(measures_by_region, "subregion_data.csv")
+```
 
-
-Many of the following columns appear to be responses to questionnaires - the questions should be in one column, and the answers in another.
-
-### Issues list
-
-* Get rid of V1 column, which is simply a row ID.
-* Resolve country label redundancy without getting rid of more fine-grained regional data, with eye to what can be done in Tableau
-* Put questions in one column, and answers in another.
-
-## Cleaning data
-
-### Issue 1
-
-#### Describe
-
-#### Clean
-
-#### Test
