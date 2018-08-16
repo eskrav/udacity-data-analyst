@@ -14,12 +14,12 @@ knitr::opts_chunk$set(echo = TRUE)
 * [**Final visualization**](https://public.tableau.com/views/PISA_wealth_final/TheRelationshipBetweenSocio-EconomicWell-BeingandPISATestPerformance?:embed=y&:display_count=yes&publish=yes)
 * [**Initial visualization**](https://public.tableau.com/shared/6G4FQZ4J8?:display_count=yes)
 * [**Codebook**](./codebook.html)
-* **Data files** used for final visualization: [subregion_data.csv](./subregion_data.csv), [country_data.csv](./country_data.csv)
-* **Feedback**: [feedback.m4a](./feedback.m4a)
+* **Data files** used for final visualization: [subregion_data.csv](./supporting_files/subregion_data.csv), [country_data.csv](./supporting_files/country_data.csv)
+* **Feedback**: [feedback.m4a](./supporting_files/feedback.m4a)
 
 ## Summary
 
-My project focuses on the 2012 PISA dataset.  In my visualization, I show that various factors connected to individual and region-wide socio-economic well-being are predictive of international and regional math, reading, and science test scores.  
+My project focuses on the 2012 PISA dataset.  In my visualization, I show that various factors connected to individual and region-wide socio-economic well-being are predictive of international and regional math, reading, and science test scores.  The plots, however, also suggest that socio-economic well-being is not the whole story, as several of the highest-scoring countries are comparatively poor, even if they score relatively well on a measure of wealth disparity.
 
 ## Design
 
@@ -47,6 +47,6 @@ The feedback I got was the following, summarized:
 
 The resources I used are the following:
 
-* PISA 2012 [technical report](./PISA-2012-technical-report-final.pdf), and [results overview](./pisa-2012-results-overview.pdf), for interpreting results and comparing generated country test scores.
+* PISA 2012 [technical report](./supporting_files/PISA-2012-technical-report-final.pdf), and [results overview](./supporting_files/pisa-2012-results-overview.pdf), for interpreting results and comparing generated country test scores.
 * [`intsvy`](https://www.jstatsoft.org/article/view/v081i07/0) R package for generating country-wide and regional test scores, as the PISA guides indicate individual student scores are not informative (https://nces.ed.gov/surveys/pisa/faq.asp#10).
 * Info on calculating Gini coefficient (measure of wealth inequality): https://en.wikipedia.org/wiki/Gini_coefficient
