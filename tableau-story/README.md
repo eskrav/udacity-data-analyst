@@ -1,1 +1,1 @@
-The writeup can be found [here](./tableau-story/writeup.html).
+The writeup can be found [here](./writeup.html).
