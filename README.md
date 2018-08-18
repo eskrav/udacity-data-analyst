@@ -2,7 +2,7 @@
 
 ## About
 - Project work for Term 2 of the [Udacity Data Analyst Nanodegree](https://classroom.udacity.com/nanodegrees/nd002/)
-- Author: [Ekaterina Kravtchenko](https://github.com/eskrav)
+- Author: [Ekaterina Kravtchenko](https://eskrav.github.io)
 
 ## Contents
 
