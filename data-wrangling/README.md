@@ -1,4 +1,4 @@
-The aim of this project was to programmatically gather and correct Twitter data, as well as analyze trends in the popular WeRateDogs Twitter account, which typically rates submitted pictures of dogs (or objects posting as dogs) on a scale of 0/10 to 15/10.
+The aim of this project was to programmatically gather and correct Twitter data, as well as analyze trends in the popular WeRateDogs Twitter account, which typically rates submitted pictures of dogs (or objects posing as dogs) on a scale of 0/10 to 15/10.
 
 The primary data points considered were the rating assigned to the dog, the apparent dog breed, the time that the tweet was posted, the number of times that the tweet was favorited or retweeted, and the "label" the post used for the dog (doggo, floofer, pupper, puppo), which denote dog stages as described in the following image:
 
