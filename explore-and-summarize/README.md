@@ -1,0 +1,1 @@
+The full writeup for this project can be found [here](https://eskrav.github.io/udacity-data-analyst/explore-and-summarize/explore-and-summarize.html).  The final summary of the data can be found in [this section](https://eskrav.github.io/udacity-data-analyst/explore-and-summarize/explore-and-summarize.html#final_plots_and_summary).
